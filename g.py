@@ -7,7 +7,7 @@ import lex
 
 T = TypeVar('T')
 
-
+        
 class Synt:
     value: Any
 
@@ -21,8 +21,26 @@ class Synt:
         if not units:
             raise ValueError('No units to parse!')
         return units[0], 1
+    
+    def pattern(self):
+        return Any
 
 
+class SyntUnion:
+    candidates: List[Type[Synt]]
+    def __post_init__(self):
+        self.trie = self.compile()
+    def compile(self):
+        trie = Trie()
+        for c in candidates:
+            trie.insert(c.pattern(), c)
+        return trie
+    def parse(self, units: List[lex.Unit]):
+        elem, skip = trie.forage(units)
+        if elem is not None:
+            return elem, skip
+        raise Exception(f'No suitable candidate for {units[10:}')
+            
 class Symbols(Enum):
     Ident = 'ident'
     LeftPar, RightPar = '(', ')'
@@ -72,6 +90,15 @@ class ItemList(Synt):
         assert units[0].type == cls.right
         return getattr(cls, 'base', cls)(items), skip
 
+    def pattern(self):
+        start = Node(self.left)
+        end   = Node(self.right)
+        t     = Node(self.T)
+        dell  = Node(self.delimiter)
+        start >> end
+        start >> t >> end
+        start >> t >> delimiter >> t >> end
+        return start
 
 class Chain(Synt, Generic[T]):
 
@@ -91,7 +118,12 @@ class Chain(Synt, Generic[T]):
             skip += tskip
             units = units[tskip:]
         return objs, skip
-
+    
+    def pattern(self):
+        t = Node(self.T)
+        t >> t
+        return t
+    
 
 class ASynt(Synt):
 
@@ -122,7 +154,15 @@ class ASynt(Synt):
             skip += tskip
             units = units[tskip:]
         return cls(**data), skip
-
+   
+    def pattern(self):
+        n = None
+        for key, value in self.__annotations__.items():
+            m = Node(value)
+            if n is not None:
+                n :: m
+            n = m
+        return n
 
 class TestASynt:
 
