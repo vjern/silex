@@ -8,6 +8,8 @@ from dataclasses import dataclass
 class Unit:
     text: str
     type: t.Optional[Enum] = None
+    def __repr__(self):
+        return f'{self.type.name}({self.text!r})'
 
 
 @dataclass
@@ -73,11 +75,14 @@ def test_init():
         'A': 'a', 'B': 'b'
     }
 
+
 def test_basic():
     
     ml = MyLexer()
     print(ml, ml.symbols)
-    assert list(ml.lex(['a', '==', 'b'])) == [
+    result = list(ml.lex(['a', '==', 'b']))
+    print(result)
+    assert result == [
         Unit('a', Symbols.Ident),
         Unit('==',Symbols.Eq),
         Unit('b', Symbols.Ident)
