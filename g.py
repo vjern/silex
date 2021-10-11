@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Tuple, Any, Union
+from typing import Generic, List, Tuple, Any, TypeVar, Union
 
 import lex
+
+
+T = TypeVar('T')
 
 
 class Synt:
@@ -70,6 +73,23 @@ class ItemList(Synt):
         return getattr(cls, 'base', cls)(items), skip
 
 
+class Chain(Synt, Generic[T]):
+    T = Synt
+    @classmethod
+    def __class_getitem__(cls, target: type):
+        return type(getattr(target, '__name__', getattr(target, 'name', None)) + 'Chain', (cls,), {'T': target})
+    @classmethod
+    def parse(cls, units):
+        skip = 0
+        objs = []
+        while units:
+            obj, tskip = cls.T.parse(units)
+            objs.append(obj)
+            skip += tskip
+            units = units[tskip:]
+        return objs, skip
+
+
 class ASynt(Synt):
 
     def __repr__(self):
@@ -89,7 +109,7 @@ class ASynt(Synt):
         skip = 0
         data = {}
         for key, value in cls.__annotations__.items():
-            if isinstance(value, Enum):
+            if isinstance(value, Symbols):
                 obj = units[0]
                 assert obj.type == value
                 tskip = 1
@@ -108,10 +128,6 @@ class TypeExpr(ASynt):
 class Arg(ASynt):
     name: Symbols.Ident
     type: TypeExpr
-
-
-class ArgList(ItemList):
-    items: Arg
 
 
 class TestASynt:
@@ -263,13 +279,24 @@ class TestItemList:
             4
         )
 
-    # def test_no_trailing(self):
-        
-    #     units = [
-    #         lex.Unit(None, Symbols.Ident),
-    #         lex.Unit(None, Symbols.Comma)
-    #     ]
 
-    #     import pytest
-    #     with pytest.raises(SyntaxError) as errinfo:
-    #         ItemList.parse(units, no_trailing=True)
+class TestChain:
+
+    def test_basic(self):
+
+        class TypeExpr(ASynt):
+            name: Symbols.Ident
+        
+        units = [
+            lex.Unit('a', Symbols.Ident),
+            lex.Unit('b', Symbols.Ident),
+            lex.Unit('a', Symbols.Ident),    
+        ]
+
+        result, offset = Chain[TypeExpr].parse(units)
+        assert offset == 3
+        assert result == [
+            TypeExpr(name=lex.Unit('a', Symbols.Ident)),
+            TypeExpr(name=lex.Unit('b', Symbols.Ident)),
+            TypeExpr(name=lex.Unit('a', Symbols.Ident))
+        ]
