@@ -11,7 +11,7 @@ T = TypeVar('T')
 class Synt:
     value: Any
 
-    def __init__(self, value = None, **kw):
+    def __init__(self, value: Any = None, **kw):
         self.value = value
         for key, value in kw.items():
             setattr(self, key, value)
@@ -74,10 +74,13 @@ class ItemList(Synt):
 
 
 class Chain(Synt, Generic[T]):
+
     T = Synt
+
     @classmethod
     def __class_getitem__(cls, target: type):
         return type(getattr(target, '__name__', getattr(target, 'name', None)) + 'Chain', (cls,), {'T': target})
+
     @classmethod
     def parse(cls, units):
         skip = 0
@@ -95,7 +98,7 @@ class ASynt(Synt):
     def __repr__(self):
         astr = ', '.join('%s=%s' % (key, getattr(self, key)) for key in self.__annotations__)
         return '%s(%s)' % (self.__class__.__name__, astr)
-    
+
     def __eq__(self, obj) -> bool:
         if not isinstance(obj, self.__class__):
             return False
@@ -121,15 +124,6 @@ class ASynt(Synt):
         return cls(**data), skip
 
 
-class TypeExpr(ASynt):
-    value: Symbols.Ident
-
-
-class Arg(ASynt):
-    name: Symbols.Ident
-    type: TypeExpr
-
-
 class TestASynt:
 
     def test_basic(self):
@@ -142,7 +136,7 @@ class TestASynt:
             lex.Unit('a', Symbols.Ident),
             lex.Unit('b', Symbols.Ident)
         ]
-        
+
         assert Arg.parse(units) == (
             Arg(
                 a=lex.Unit('a', Symbols.Ident),
@@ -150,12 +144,12 @@ class TestASynt:
             ),
             2
         )
-    
+
     def test_nested(self):
 
         class TypeExpr(ASynt):
             name: Symbols.Ident
-        
+
         class Param(ASynt):
             name: Symbols.Ident
             type: TypeExpr
@@ -164,11 +158,11 @@ class TestASynt:
             name: Symbols.Ident
             paramList: ItemList[Param]
             returnType: TypeExpr
-        
+
         units = [
             lex.Unit('doThing', Symbols.Ident),
             lex.Unit('(', Symbols.LeftPar),
-                lex.Unit('thing', Symbols.Ident), lex.Unit('int', Symbols.Ident),
+            lex.Unit('thing', Symbols.Ident), lex.Unit('int', Symbols.Ident),
             lex.Unit(')', Symbols.RightPar),
             lex.Unit('str', Symbols.Ident)
         ]
@@ -190,7 +184,7 @@ class TestASynt:
 class TestItemList:
 
     def test_basic(self):
-        
+
         units = [
             lex.Unit('(', Symbols.LeftPar),
             lex.Unit('a', Symbols.Ident),
@@ -207,10 +201,10 @@ class TestItemList:
         ])
 
     def test_custom_brackets(self):
-    
+
         class ItemSet(ItemList):
             left, right = Symbols.LeftBracket, Symbols.RightBracket
-        
+
         units = [
             lex.Unit('(', Symbols.LeftBracket),
             lex.Unit('a', Symbols.Ident),
@@ -240,15 +234,15 @@ class TestItemList:
 
         units = [
             lex.Unit('(', Symbols.LeftPar),
-                lex.Unit('[', Symbols.LeftSquareBracket),
-                    lex.Unit('a', Symbols.Ident), lex.Unit(',', Symbols.Comma),
-                    lex.Unit('b', Symbols.Ident),
-                lex.Unit(']', Symbols.RightSquareBracket),
+            lex.Unit('[', Symbols.LeftSquareBracket),
+            lex.Unit('a', Symbols.Ident), lex.Unit(',', Symbols.Comma),
+            lex.Unit('b', Symbols.Ident),
+            lex.Unit(']', Symbols.RightSquareBracket),
             lex.Unit(',', Symbols.Comma),
-                lex.Unit('[', Symbols.LeftSquareBracket),
-                    lex.Unit('c', Symbols.Ident), lex.Unit(',', Symbols.Comma),
-                    lex.Unit('d', Symbols.Ident),
-                lex.Unit(']', Symbols.RightSquareBracket),
+            lex.Unit('[', Symbols.LeftSquareBracket),
+            lex.Unit('c', Symbols.Ident), lex.Unit(',', Symbols.Comma),
+            lex.Unit('d', Symbols.Ident),
+            lex.Unit(']', Symbols.RightSquareBracket),
             lex.Unit(')', Symbols.RightPar)
         ]
 
@@ -257,26 +251,7 @@ class TestItemList:
                 Array([lex.Unit('a', Symbols.Ident), lex.Unit('b', Symbols.Ident)]),
                 Array([lex.Unit('c', Symbols.Ident), lex.Unit('d', Symbols.Ident)])
             ]),
-             len(units)
-        )
-    
-    def test_Arg(self):
-
-        units = [
-            lex.Unit('(', Symbols.LeftPar),
-            lex.Unit('a', Symbols.Ident),
-            lex.Unit('str', Symbols.Ident),
-            lex.Unit(')', Symbols.RightPar),
-        ]
-
-        assert ItemList[Arg].parse(units) == (
-            ItemList([
-                Arg(
-                    name=lex.Unit('a', Symbols.Ident),
-                    type=TypeExpr(value=lex.Unit('str', Symbols.Ident))
-                )
-            ]),
-            4
+            len(units)
         )
 
 
@@ -286,11 +261,11 @@ class TestChain:
 
         class TypeExpr(ASynt):
             name: Symbols.Ident
-        
+
         units = [
             lex.Unit('a', Symbols.Ident),
             lex.Unit('b', Symbols.Ident),
-            lex.Unit('a', Symbols.Ident),    
+            lex.Unit('a', Symbols.Ident),
         ]
 
         result, offset = Chain[TypeExpr].parse(units)
@@ -300,3 +275,6 @@ class TestChain:
             TypeExpr(name=lex.Unit('b', Symbols.Ident)),
             TypeExpr(name=lex.Unit('a', Symbols.Ident))
         ]
+
+
+__all__ = ['Synt', 'ASynt', 'Chain', 'ItemList', 'Symbols']
