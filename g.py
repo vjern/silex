@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Generic, List, Tuple, Any, TypeVar, Union
+from typing import Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, Union
+import typing
 
 import lex
 
@@ -17,10 +18,14 @@ class Synt:
             setattr(self, key, value)
 
     @classmethod
-    def parse(cls, units: List[lex.Unit]) -> Tuple[Union['Synt', lex.Unit], int]:
+    def parse(cls, units: List[lex.Unit]) -> Tuple[Union['Synt', lex.Unit], int, str]:
         if not units:
             raise ValueError('No units to parse!')
-        return units[0], 1
+        return units[0], 1, None
+    
+    @classmethod
+    def patterns(cls) -> List[List[Enum]]:
+        return [[Any]]
 
 
 class Symbols(Enum):
@@ -62,7 +67,7 @@ class ItemList(Synt):
                 skip += 1
             else:
                 # expect a TARGET
-                obj, tskip = cls.T.parse(units)
+                obj, tskip, err = cls.T.parse(units)
                 skip += tskip
                 units = units[tskip:]
                 items.append(obj)
@@ -70,7 +75,7 @@ class ItemList(Synt):
 
         # expect a right par
         assert units[0].type == cls.right
-        return getattr(cls, 'base', cls)(items), skip
+        return getattr(cls, 'base', cls)(items), skip, None
 
 
 class Chain(Synt, Generic[T]):
@@ -86,11 +91,15 @@ class Chain(Synt, Generic[T]):
         skip = 0
         objs = []
         while units:
-            obj, tskip = cls.T.parse(units)
+            obj, tskip, err = cls.T.parse(units)
             objs.append(obj)
             skip += tskip
             units = units[tskip:]
-        return objs, skip
+        return objs, skip, None
+    
+    @classmethod
+    def patterns(cls):
+        pass
 
 
 class ASynt(Synt):
@@ -112,16 +121,45 @@ class ASynt(Synt):
         skip = 0
         data = {}
         for key, value in cls.__annotations__.items():
+
+            required = True
+            obj = None
+            tskip = 0
+
+            while isinstance(value, typing._GenericAlias):
+                # assume it's an Optional
+                required = False
+                value, *_ = value.__args__
+            
             if isinstance(value, Symbols):
-                obj = units[0]
-                assert obj.type == value
-                tskip = 1
+                if units:
+                    obj = units[0]
+                    assert obj.type == value
+                    tskip = 1
             else:
-                obj, tskip = value.parse(units)
+                obj, tskip, err = value.parse(units)  # can return None, 0 if not able to parse
+
+            if required and obj is None:
+                raise err or Exception('Expected %s' % value)
+
             data[key] = obj
             skip += tskip
             units = units[tskip:]
-        return cls(**data), skip
+
+        return cls(**data), skip, None
+    
+    @classmethod
+    def patterns(cls):
+        pats = [[]]
+        for _, value in cls.__annotations__.items():
+            if isinstance(value, Symbols):
+                for p in pats:
+                    p.append(value)
+            else:
+                for p in value.patterns():
+                    for i, q in enumerate(pats):
+                        pats[i] = [*q, *p]
+        return pats
 
 
 class TestASynt:
@@ -137,13 +175,49 @@ class TestASynt:
             lex.Unit('b', Symbols.Ident)
         ]
 
-        assert Arg.parse(units) == (
-            Arg(
-                a=lex.Unit('a', Symbols.Ident),
-                b=lex.Unit('b', Symbols.Ident)
-            ),
-            2
+        result, offset, err = Arg.parse(units)
+        assert result == Arg(
+            a=lex.Unit('a', Symbols.Ident),
+            b=lex.Unit('b', Symbols.Ident)
         )
+        assert offset == 2
+        assert err is None
+
+    def test_patterns(self):
+
+        class A(ASynt):
+            name: Symbols.Ident
+            type: Symbols.Ident
+
+        assert A.patterns() == [[Symbols.Ident, Symbols.Ident]]
+    
+        class B(ASynt):
+            a: A
+            name: Symbols.Ident
+        
+        assert B.patterns() == [[Symbols.Ident, Symbols.Ident, Symbols.Ident]]
+    
+        class C(ASynt):
+            start: Symbols.RightPar
+            a: A
+            b: B
+            end: Symbols.LeftPar
+
+        pats = C.patterns()
+        print(pats)
+        assert pats == [
+            [
+                Symbols.RightPar,
+                    # a: A
+                    Symbols.Ident, Symbols.Ident,
+                    # b: B
+                        # b: B -> a: A
+                        Symbols.Ident, Symbols.Ident,
+                        # b: B -> name
+                        Symbols.Ident,
+                Symbols.LeftPar
+            ]
+        ]
 
     def test_nested(self):
 
@@ -167,8 +241,9 @@ class TestASynt:
             lex.Unit('str', Symbols.Ident)
         ]
 
-        result, offset = Func.parse(units)
+        result, offset, err = Func.parse(units)
         assert offset == 6
+        assert err is None
         assert result == Func(
             name=lex.Unit('doThing', Symbols.Ident),
             paramList=ItemList([
@@ -179,6 +254,25 @@ class TestASynt:
             ]),
             returnType=TypeExpr(name=lex.Unit('str', Symbols.Ident))
         )
+
+    def test_optional(self):
+
+        class Arg(ASynt):
+            a: Optional[Literal[Symbols.Ident]]
+            b: Optional[Literal[Symbols.Ident]]
+
+        units = [
+            lex.Unit('a', Symbols.Ident),
+            lex.Unit('b', Symbols.Ident)
+        ]
+
+        result, offset, err = Arg.parse(units)
+        assert result == Arg(
+                a=lex.Unit('a', Symbols.Ident),
+                b=lex.Unit('b', Symbols.Ident)
+            )
+        assert offset == 2
+        assert err is None
 
 
 class TestItemList:
@@ -193,8 +287,9 @@ class TestItemList:
             lex.Unit(')', Symbols.RightPar)
         ]
 
-        result, offset = ItemList.parse(units)
+        result, offset, err = ItemList.parse(units)
         assert offset == 5
+        assert err is None
         assert result == ItemList([
             lex.Unit('a', Symbols.Ident),
             lex.Unit('b', Symbols.Ident)
@@ -213,8 +308,9 @@ class TestItemList:
             lex.Unit(')', Symbols.RightBracket)
         ]
 
-        result, offset = ItemSet.parse(units)
+        result, offset, err = ItemSet.parse(units)
         assert offset == 5
+        assert err is None
         assert result == ItemSet([
             lex.Unit('a', Symbols.Ident),
             lex.Unit('b', Symbols.Ident)
@@ -225,7 +321,10 @@ class TestItemList:
             lex.Unit('(', Symbols.LeftPar),
             lex.Unit(')', Symbols.RightPar)
         ]
-        assert ItemList.parse(units) == (ItemList([]), 2)
+        result, offset, err = ItemList.parse(units)
+        assert result == ItemList([])
+        assert offset == 2
+        assert err is None
 
     def test_nested(self):
 
@@ -246,13 +345,13 @@ class TestItemList:
             lex.Unit(')', Symbols.RightPar)
         ]
 
-        assert ItemList[Array].parse(units) == (
-            ItemList([
-                Array([lex.Unit('a', Symbols.Ident), lex.Unit('b', Symbols.Ident)]),
-                Array([lex.Unit('c', Symbols.Ident), lex.Unit('d', Symbols.Ident)])
-            ]),
-            len(units)
-        )
+        result, offset, err = ItemList[Array].parse(units)
+        assert  result == ItemList([
+            Array([lex.Unit('a', Symbols.Ident), lex.Unit('b', Symbols.Ident)]),
+            Array([lex.Unit('c', Symbols.Ident), lex.Unit('d', Symbols.Ident)])
+        ])
+        assert offset == len(units)
+        assert err is None
 
 
 class TestChain:
@@ -268,13 +367,64 @@ class TestChain:
             lex.Unit('a', Symbols.Ident),
         ]
 
-        result, offset = Chain[TypeExpr].parse(units)
+        result, offset, err = Chain[TypeExpr].parse(units)
         assert offset == 3
+        assert err is None
         assert result == [
             TypeExpr(name=lex.Unit('a', Symbols.Ident)),
             TypeExpr(name=lex.Unit('b', Symbols.Ident)),
             TypeExpr(name=lex.Unit('a', Symbols.Ident))
         ]
+
+
+@dataclass
+class SyntUnion(Synt):
+    candidates: List[Type[Synt]]
+
+    @classmethod
+    def build(cls):
+        from trie import Trie
+        if hasattr(cls, 'tries'):
+            return
+        cls.tries = {
+            c: Trie().init(*c.patterns())
+            for c in cls.candidates
+        }
+
+    @classmethod
+    def parse(cls, units):
+
+        # build a trie out of each candidate's pattern
+        cls.build()
+
+        # take the longest result
+
+        result = None
+        maxsize = 0
+
+        for c, trie in cls.tries.items():
+            found, size = trie.find(units)
+            if found and size > maxsize:
+                maxsize = size
+                result = c
+
+        return result
+
+
+class TestUnion:
+    
+    def test_basic(self):
+
+        class Var(ASynt):
+            name: Symbols.Ident
+            type: Symbols.Ident
+        
+        assert Var.patterns() == [
+            [Symbols.Ident, Symbols.Ident]
+        ]
+
+        class IdentOrVar(SyntUnion):
+            candidates = [Var, Symbols.Ident]
 
 
 __all__ = ['Synt', 'ASynt', 'Chain', 'ItemList', 'Symbols']
