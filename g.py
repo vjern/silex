@@ -18,11 +18,11 @@ class Synt:
             setattr(self, key, value)
 
     @classmethod
-    def parse(cls, units: List[lex.Unit]) -> Tuple[Union['Synt', lex.Unit], int, str]:
+    def parse(cls, units: List[lex.Unit]) -> Tuple[Union['Synt', lex.Unit], int, Optional[Exception]]:
         if not units:
             raise ValueError('No units to parse!')
         return units[0], 1, None
-    
+
     @classmethod
     def patterns(cls) -> List[List[Enum]]:
         return [[Any]]
@@ -35,6 +35,7 @@ class Symbols(Enum):
     LeftSquareBracket, RightSquareBracket = '[', ']'
     FuncKeyword = 'fn'
     Comma = ','
+    NumberLiteral = r'\d+'
 
 
 @dataclass
@@ -96,7 +97,7 @@ class Chain(Synt, Generic[T]):
             skip += tskip
             units = units[tskip:]
         return objs, skip, None
-    
+
     @classmethod
     def patterns(cls):
         pass
@@ -120,29 +121,33 @@ class ASynt(Synt):
 
     @classmethod
     def parse(cls, units):
+
         skip = 0
         data = {}
+
         for key, value in cls.__annotations__.items():
 
             required = True
             obj = None
+            err = None
             tskip = 0
 
             while isinstance(value, typing._GenericAlias):
-                # assume it's an Optional
                 required = False
                 value, *_ = value.__args__
-            
+
             if isinstance(value, Symbols):
                 if units:
                     obj = units[0]
-                    assert obj.type == value
-                    tskip = 1
+                    if obj.type != value:
+                        obj = None
+                    else:
+                        tskip = 1
             else:
-                obj, tskip, err = value.parse(units)  # can return None, 0 if not able to parse
+                obj, tskip, err = value.parse(units)
 
             if required and obj is None:
-                raise err or Exception('Expected %s' % value)
+                return obj, tskip, err or Exception('Expected %s' % value)
 
             if not key.startswith('_'):
                 data[key] = obj
@@ -150,7 +155,7 @@ class ASynt(Synt):
             units = units[tskip:]
 
         return cls(**data), skip, None
-    
+
     @classmethod
     def patterns(cls):
         pats = [[]]
@@ -193,13 +198,13 @@ class TestASynt:
             type: Symbols.Ident
 
         assert A.patterns() == [[Symbols.Ident, Symbols.Ident]]
-    
+
         class B(ASynt):
             a: A
             name: Symbols.Ident
-        
+
         assert B.patterns() == [[Symbols.Ident, Symbols.Ident, Symbols.Ident]]
-    
+
         class C(ASynt):
             start: Symbols.RightPar
             a: A
@@ -258,25 +263,6 @@ class TestASynt:
             returnType=TypeExpr(name=lex.Unit('str', Symbols.Ident))
         )
 
-    def test_optional(self):
-
-        class Arg(ASynt):
-            a: Optional[Literal[Symbols.Ident]]
-            b: Optional[Literal[Symbols.Ident]]
-
-        units = [
-            lex.Unit('a', Symbols.Ident),
-            lex.Unit('b', Symbols.Ident)
-        ]
-
-        result, offset, err = Arg.parse(units)
-        assert result == Arg(
-                a=lex.Unit('a', Symbols.Ident),
-                b=lex.Unit('b', Symbols.Ident)
-            )
-        assert offset == 2
-        assert err is None
-
     def test_hidden(self):
 
         class A(ASynt):
@@ -297,6 +283,102 @@ class TestASynt:
         )
         assert offset == 3
         assert err is None
+
+    class TestOptional:
+
+        class Arg(ASynt):
+            a: Optional[Literal[Symbols.Ident]]
+            b: Optional[Literal[Symbols.NumberLiteral]]
+
+        def test_seamless(self):
+
+            units = [
+                lex.Unit('a', Symbols.Ident),
+                lex.Unit('b', Symbols.NumberLiteral)
+            ]
+
+            result, offset, err = self.Arg.parse(units)
+            assert result == self.Arg(
+                    a=lex.Unit('a', Symbols.Ident),
+                    b=lex.Unit('b', Symbols.NumberLiteral)
+                )
+            assert offset == 2
+            assert err is None
+
+        def test_basic(self):
+
+            units = [
+                lex.Unit('a', Symbols.Ident),
+            ]
+
+            result, offset, err = self.Arg.parse(units)
+            assert result == self.Arg(
+                    a=lex.Unit('a', Symbols.Ident),
+                    b=None
+                )
+            assert offset == 1
+            assert err is None
+
+        def test_skip(self):
+
+            units = [
+                lex.Unit('a', Symbols.NumberLiteral),
+            ]
+
+            result, offset, err = self.Arg.parse(units)
+            assert result == self.Arg(
+                    a=None,
+                    b=lex.Unit('a', Symbols.NumberLiteral)
+                )
+            assert offset == 1
+            assert err is None
+
+        def test_early_optional(self):
+
+            class Arg(ASynt):
+                a: Optional[Literal[Symbols.NumberLiteral]]
+                b: Symbols.Ident
+
+            units = [
+                lex.Unit('a', Symbols.NumberLiteral),
+            ]
+
+            result, offset, err = Arg.parse(units)
+            assert result is None
+            assert offset == 0
+            assert err is not None
+            assert str(err) == 'Expected %s' % Symbols.Ident
+
+        def test_nested(self):
+            
+            class A(ASynt):
+                name: Symbols.Ident
+            
+            class B(ASynt):
+                _left: Symbols.LeftPar
+                a: Optional[A]
+                _right: Symbols.RightPar
+
+            units = [
+                lex.Unit(None, Symbols.LeftPar),
+                lex.Unit(None, Symbols.RightPar)
+            ]
+
+            result, offset, err = B.parse(units)
+            assert result == B(a=None)
+            assert offset == 2
+            assert err is None
+
+            units = [
+                lex.Unit(None, Symbols.LeftPar),
+                lex.Unit('a', Symbols.Ident),
+                lex.Unit(None, Symbols.RightPar)
+            ]
+
+            result, offset, err = B.parse(units)
+            assert result == B(a=A(name=lex.Unit('a', Symbols.Ident)))
+            assert offset == 3
+            assert err is None
 
 
 class TestItemList:
@@ -436,13 +518,13 @@ class SyntUnion(Synt):
 
 
 class TestUnion:
-    
+
     def test_basic(self):
 
         class Var(ASynt):
             name: Symbols.Ident
             type: Symbols.Ident
-        
+
         assert Var.patterns() == [
             [Symbols.Ident, Symbols.Ident]
         ]
