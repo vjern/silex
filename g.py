@@ -105,13 +105,15 @@ class Chain(Synt, Generic[T]):
 class ASynt(Synt):
 
     def __repr__(self):
-        astr = ', '.join('%s=%s' % (key, getattr(self, key)) for key in self.__annotations__)
+        astr = ', '.join('%s=%s' % (key, getattr(self, key)) for key in self.__annotations__ if not key.startswith('_'))
         return '%s(%s)' % (self.__class__.__name__, astr)
 
     def __eq__(self, obj) -> bool:
         if not isinstance(obj, self.__class__):
             return False
         for key in self.__annotations__:
+            if key.startswith('_'):
+                continue
             if getattr(obj, key) != getattr(self, key):
                 return False
         return True
@@ -142,7 +144,8 @@ class ASynt(Synt):
             if required and obj is None:
                 raise err or Exception('Expected %s' % value)
 
-            data[key] = obj
+            if not key.startswith('_'):
+                data[key] = obj
             skip += tskip
             units = units[tskip:]
 
@@ -272,6 +275,27 @@ class TestASynt:
                 b=lex.Unit('b', Symbols.Ident)
             )
         assert offset == 2
+        assert err is None
+
+    def test_hidden(self):
+
+        class A(ASynt):
+            name: Symbols.Ident
+            _c: Symbols.Comma
+            value: Symbols.Ident
+        
+        units = [
+            lex.Unit('a', Symbols.Ident),
+            lex.Unit(',', Symbols.Comma),
+            lex.Unit('b', Symbols.Ident),
+        ]
+
+        r, offset, err = A.parse(units)
+        assert r == A(
+            name=lex.Unit('a', Symbols.Ident),
+            value=lex.Unit('b', Symbols.Ident)
+        )
+        assert offset == 3
         assert err is None
 
 
