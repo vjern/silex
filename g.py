@@ -160,13 +160,23 @@ class ASynt(Synt):
     def patterns(cls):
         pats = [[]]
         for _, value in cls.__annotations__.items():
+
+            required = True
+            while isinstance(value, typing._GenericAlias):
+                required = False
+                value, *_ = value.__args__
+            
             if isinstance(value, Symbols):
-                for p in pats:
+                for p in list(pats):
+                    if not required:
+                        pats.append(list(p))
                     p.append(value)
             else:
                 for p in value.patterns():
-                    for i, q in enumerate(pats):
+                    for i, q in enumerate(list(pats)):
                         pats[i] = [*q, *p]
+                        if not required:
+                            pats.append(list(q))
         return pats
 
 
@@ -226,6 +236,27 @@ class TestASynt:
                 Symbols.LeftPar
             ]
         ]
+
+    # def test_patterns_nested(self):
+
+    #     class TypeExpr(ASynt):
+    #         name: Symbols.Ident
+
+    #     class Param(ASynt):
+    #         name: Symbols.Ident
+    #         type: TypeExpr
+
+    #     class Func(ASynt):
+    #         name: Symbols.Ident
+    #         paramList: ItemList[Param]
+    #         returnType: TypeExpr
+        
+    #     assert TypeExpr.patterns() == [[Symbols.Ident]]
+
+    #     assert Param.patterns() == [
+    #         [Symbols.Ident, Symbols.Ident],
+    #         [Symbols.Ident],
+    #     ]
 
     def test_nested(self):
 
@@ -379,6 +410,59 @@ class TestASynt:
             assert result == B(a=A(name=lex.Unit('a', Symbols.Ident)))
             assert offset == 3
             assert err is None
+        
+        def test_patterns(self):
+
+            assert self.Arg.patterns() == [
+                [Symbols.Ident, Symbols.NumberLiteral],
+                [Symbols.NumberLiteral],
+                [Symbols.Ident],
+                []
+            ]
+
+        def test_patterns_nested(self):
+
+            class A(ASynt):
+                name: Symbols.Ident
+            
+            class B(ASynt):
+                _left: Symbols.LeftPar
+                a: Optional[A]
+                _right: Symbols.RightPar
+
+            assert A.patterns() == [
+                [Symbols.Ident]
+            ]
+            
+            assert B.patterns() == [
+                [Symbols.LeftPar, Symbols.Ident, Symbols.RightPar],
+                [Symbols.LeftPar, Symbols.RightPar],
+            ]
+        
+        # def test_patterns_nested_2(self):
+
+        #     class TypeExpr(ASynt):
+        #         name: Symbols.Ident
+
+        #     class Param(ASynt):
+        #         name: Symbols.Ident
+        #         type: Optional[TypeExpr]
+
+        #     class Func(ASynt):
+        #         name: Symbols.Ident
+        #         paramList: ItemList[Param]
+        #         returnType: Optional[TypeExpr]
+            
+        #     assert TypeExpr.patterns() == [[Symbols.Ident]]
+
+        #     assert Param.patterns() == [
+        #         [Symbols.Ident, Symbols.Ident],
+        #         [Symbols.Ident],
+        #     ]
+
+        #     assert Func.patterns() == [
+        #         [Symbols.Ident, Symbols.LeftPar]
+        #     ]
 
 
 class TestItemList:
@@ -458,6 +542,22 @@ class TestItemList:
         ])
         assert offset == len(units)
         assert err is None
+
+    # def test_patterns(self):
+        
+    #     start = Node()
+    #     item  = Node()
+    #     end   = Node()
+
+    #     start >> Symbols.LeftPar >> item
+    #     item  >> Any >> Symbols.Comma >> item
+    #     item  >> Any >> end
+    #     start >> end
+
+    #     assert ItemList.tree() == n
+
+    # def test_patterns_nested(self):
+    #     assert False
 
 
 class TestChain:
