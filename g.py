@@ -4,6 +4,7 @@ from typing import Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, 
 import typing
 
 import lex
+import tree
 
 
 T = TypeVar('T')
@@ -25,7 +26,13 @@ class Synt:
 
     @classmethod
     def patterns(cls) -> List[List[Enum]]:
-        return [[Any]]
+        return [[tree.Specials.Any]]
+    
+    @classmethod
+    def tree(cls) -> tree.Node:
+        start, end = tree.Node(), tree.Node(goal=cls)
+        start >> tree.Specials.Any >> end
+        return start, end
 
 
 class Symbols(Enum):
@@ -179,6 +186,14 @@ class ASynt(Synt):
                             pats.append(list(q))
         return pats
 
+    @classmethod
+    def tree(cls):
+        start = tree.Node()
+        end   = tree.Node(goal=cls)
+        for pat in cls.patterns():
+            start >> pat >> end
+        return start, end
+
 
 class TestASynt:
 
@@ -237,26 +252,29 @@ class TestASynt:
             ]
         ]
 
-    # def test_patterns_nested(self):
+    def test_patterns_nested(self):
 
-    #     class TypeExpr(ASynt):
-    #         name: Symbols.Ident
+        class TypeExpr(ASynt):
+            name: Symbols.Ident
 
-    #     class Param(ASynt):
-    #         name: Symbols.Ident
-    #         type: TypeExpr
+        class Param(ASynt):
+            name: Symbols.Ident
+            type: TypeExpr
 
-    #     class Func(ASynt):
-    #         name: Symbols.Ident
-    #         paramList: ItemList[Param]
-    #         returnType: TypeExpr
+        class Func(ASynt):
+            name: Symbols.Ident
+            param: Param
+            returnType: TypeExpr
         
-    #     assert TypeExpr.patterns() == [[Symbols.Ident]]
+        assert TypeExpr.patterns() == [[Symbols.Ident]]
 
-    #     assert Param.patterns() == [
-    #         [Symbols.Ident, Symbols.Ident],
-    #         [Symbols.Ident],
-    #     ]
+        assert Param.patterns() == [
+            [Symbols.Ident, Symbols.Ident],
+        ]
+
+        assert Func.patterns() == [
+            [Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident]
+        ]
 
     def test_nested(self):
 
@@ -314,6 +332,46 @@ class TestASynt:
         )
         assert offset == 3
         assert err is None
+    
+    def test_tree(self):
+
+        class TypeExpr(ASynt):
+            name: Symbols.Ident
+
+        class Param(ASynt):
+            name: Symbols.Ident
+            type: TypeExpr
+
+        class Func(ASynt):
+            name: Symbols.Ident
+            param: Param
+            returnType: TypeExpr
+
+        units = [Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident]
+
+        root = tree.Node()
+        leaf = tree.Node(goal=TypeExpr)
+        root >> Symbols.Ident >> leaf
+        t, end = TypeExpr.tree()
+        assert root == t
+        assert leaf == end
+        assert t.first(units) == (TypeExpr, 1)
+
+        root = tree.Node()
+        leaf = tree.Node(goal=Param)
+        root >> (Symbols.Ident, Symbols.Ident) >> leaf
+        t, end = Param.tree()
+        assert root == t
+        assert leaf == end
+        assert t.first(units) == (Param, 2)
+
+        root = tree.Node()
+        leaf = tree.Node(goal=Func)
+        root >> (Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident) >> leaf
+        t, end = Func.tree()
+        assert root == t
+        assert leaf == end
+        assert t.first(units) == (Func, 4)
 
     class TestOptional:
 
@@ -439,31 +497,24 @@ class TestASynt:
                 [Symbols.LeftPar, Symbols.RightPar],
             ]
         
-        # def test_patterns_nested_2(self):
-
-        #     class TypeExpr(ASynt):
-        #         name: Symbols.Ident
-
-        #     class Param(ASynt):
-        #         name: Symbols.Ident
-        #         type: Optional[TypeExpr]
-
-        #     class Func(ASynt):
-        #         name: Symbols.Ident
-        #         paramList: ItemList[Param]
-        #         returnType: Optional[TypeExpr]
-            
-        #     assert TypeExpr.patterns() == [[Symbols.Ident]]
-
-        #     assert Param.patterns() == [
-        #         [Symbols.Ident, Symbols.Ident],
-        #         [Symbols.Ident],
-        #     ]
-
-        #     assert Func.patterns() == [
-        #         [Symbols.Ident, Symbols.LeftPar]
-        #     ]
-
+        def test_tree(self):
+            root = tree.Node()
+            leaf = tree.Node(goal=self.Arg)
+            root.children = {
+                tree.Specials.Empty: leaf,
+                Symbols.Ident: leaf,
+                Symbols.NumberLiteral: leaf,
+            }
+            t, end = self.Arg.tree()
+            assert root == t
+            assert leaf == end
+            assert t.first([]) == (False, 0)  # you can't have empty patterns anyway
+            assert t.first([Symbols.Ident]) == (self.Arg, 1)
+            assert t.first([Symbols.NumberLiteral]) == (self.Arg, 1)
+            assert t.first([Symbols.Ident, Symbols.NumberLiteral]) == (self.Arg, 2)
+            # FIXME ^ this isn't supported by trie. you can only find the shortest pattern or a pattern that matches the entire array.
+            assert t.first([Symbols.NumberLiteral, Symbols.Ident]) == (False, 2)
+            # why not just use .parse in the end ? take the longest skip
 
 class TestItemList:
 

@@ -18,6 +18,9 @@ class Specials(Enum):
     Empty = 'empty'
 
 
+Empty = Specials.Empty
+
+
 from unittest.mock import Mock
 
 
@@ -86,12 +89,10 @@ class Node:
                         longest = (c, size)
             if truecount > 1:
                 winner = tiniest if take_first else longest
-            # FIXME
         else:
             winner = candidates and candidates[0]
-        
+
         if winner:
-            print(f'{winner = }, {items = }')
             cans, cskip = winner
             if cskip or cans:
                 ans = cans 
@@ -123,6 +124,9 @@ class Rshifter:
         self.op = op
 
     def __rshift__(self, right):
+
+        if not self.op:
+            self.op = [Specials.Empty]
 
         node = self.left
         for op in self.op[:-1]:
