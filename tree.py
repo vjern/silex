@@ -31,9 +31,13 @@ class Node:
     goal: Any = None  # if provided, should evaluate to True
     leaves: Set[Any] = field(default_factory=set)
     children: Dict[Union[Enum, Specials, None], 'Node'] = field(default_factory=dict)
+    name: str = None
 
     def __rshift__(self, charge):
         return Rshifter(self, charge)
+
+    def __hash__(self):
+        return id(self)
 
     def find(self, items: List, take_first: bool = False) -> Tuple[bool, int]:
         skip = 1
@@ -64,6 +68,15 @@ class Node:
     def __or__(self, node):
         return Node(children={Specials.Empty: [self, node]})
 
+    def print(self, depth: int = 0, indent: int = 2, key: str = None, history: set = set()):
+        if self in history:
+            return print(' ' * depth * indent + (f'$ \033[96m{self.name}\033[m' if self.name else '...'))
+        tstr = f'{key}: ' * bool(key) + (f'\033[1;92m{self.name or self.goal}\033[m' * bool(self.goal) or f'\033[93m{self.name}\033[m' * bool(self.name) or '$')
+        print(' ' * depth * indent + tstr, '{' + '}' * (not len(self.children)))
+        for key, value in self.children.items():
+            value.print(depth + 1, key=key, history={*history, self})
+        if len(self.children):
+            print(' ' * depth * indent + '}')
 
 class Rshifter:
 
@@ -74,17 +87,15 @@ class Rshifter:
         self.op = op
 
     def __rshift__(self, right):
-        stack = [
-            self.left,
-            *[Node() for _ in range(len(self.op) - 1)],
-            right
-        ]
-        op_stack = list(reversed(self.op))
-        left = stack[0]
-        for right in stack[1:]:
-            left.children[op_stack.pop()] = right
-            left = right
-        return left
+
+        node = self.left
+        for op in self.op[:-1]:
+            child = node.children.get(op, Node())
+            node.children[op] = child
+            node = child
+        op = self.op[-1]
+        node.children[op] = right
+        return right
 
 
 class TestNode:
@@ -109,15 +120,20 @@ class TestNode:
         r = n >> ('a', 'b') >> m
         assert r is m
 
+        n >> ('a', 'c') >> Node()
+        assert n.children['a'].children.keys() == {'b', 'c'}
+
     def test_concrete(self):
 
-        start = Node()
-        end = Node(goal=True)
-        item = Node()
+        start = Node(name='start')
+        end = Node(name='end', goal=True)
+        item = Node(name='item')
 
         start >> Symbols.LeftPar >> item
         item  >> [Specials.Any, Symbols.Comma] >> item  # requires trailing comma always
         item  >> Symbols.RightPar >> end
+
+        start.print()
 
         assert start.children == {
             Symbols.LeftPar: item,
@@ -143,6 +159,8 @@ class TestNode:
             item >> [Specials.Any, Symbols.Comma] >>
             item >> Symbols.RightPar >> end
         )
+
+        start.print()
         
         assert start.children == {
             Symbols.LeftPar: item,
