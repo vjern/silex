@@ -39,6 +39,9 @@ class Node:
     def __hash__(self):
         return id(self)
 
+    def first(self, items):
+        return self.find(items, take_first=True)
+
     def find(self, items: List, take_first: bool = False) -> Tuple[bool, int]:
         skip = 1
         ans = False
@@ -51,19 +54,51 @@ class Node:
         if t:
             ans, cskip = t.find(items[1:], take_first=take_first)
             skip += cskip
-        elif Specials.Any in self.children:
+            return (ans, skip)
+
+        candidates = []
+
+        if Specials.Any in self.children:
             ans = take_first
             cans, cskip = self.children[Specials.Any].find(items[1:], take_first=take_first)
             if cskip:
                 ans = cans
-            skip += cskip
-        elif Specials.Empty in self.children:
-            ans = take_first
-            cans, cskip = self.children[Specials.Empty].find(items, take_first=take_first)
-            if cskip:
-                ans = cans
-            skip += cskip
+            candidates.append([cans, cskip])
+
+        if Specials.Empty in self.children:
+            cans, cskip = self.children[Specials.Empty].find(items[:], take_first=take_first)
+            candidates.append([cans, cskip - 1])
+
+        winner = None
+
+        # what if there are two of them ? take shortest or longest ?
+        if len(candidates) > 1:
+            tiniest = None
+            longest = None
+            truecount = 0
+            for c, size in candidates:
+                if c:
+                    truecount += 1
+                    winner = (c, size)
+                    if not tiniest or size < tiniest[1]:
+                        tiniest = (c, size)
+                    if not longest or size > longest[1]:
+                        longest = (c, size)
+            if truecount > 1:
+                winner = tiniest if take_first else longest
+            # FIXME
+        else:
+            winner = candidates and candidates[0]
+        
+        if winner:
+            print(f'{winner = }, {items = }')
+            cans, cskip = winner
+            if cskip or cans:
+                ans = cans 
+                skip += cskip
+
         return (ans, skip)
+
     
     def __or__(self, node):
         return Node(children={Specials.Empty: [self, node]})
@@ -77,6 +112,7 @@ class Node:
             value.print(depth + 1, key=key, history={*history, self})
         if len(self.children):
             print(' ' * depth * indent + '}')
+
 
 class Rshifter:
 
@@ -180,7 +216,7 @@ class TestNode:
         class Expr:
 
             @classmethod
-            def automaton(cls):
+            def tree(cls):
 
                 start = Node()
                 end = Node(goal=cls)
@@ -198,7 +234,7 @@ class TestNode:
                 Symbols.LeftPar,
                 Symbols.RightPar
             ]
-            assert self.Expr.automaton().find(units) == (self.Expr, 2)
+            assert self.Expr.tree().find(units) == (self.Expr, 2)
         
         def test_extended(self):
     
@@ -207,7 +243,7 @@ class TestNode:
                 Symbols.Ident,
                 Symbols.RightPar
             ]
-            assert self.Expr.automaton().find(units) == (False, 3)
+            assert self.Expr.tree().find(units) == (False, 3)
 
             units = [
                 Symbols.LeftPar,
@@ -215,7 +251,7 @@ class TestNode:
                 Symbols.Comma,
                 Symbols.RightPar
             ]
-            assert self.Expr.automaton().find(units) == (self.Expr, 4)
+            assert self.Expr.tree().find(units) == (self.Expr, 4)
     
             units = [
                 Symbols.LeftPar,
@@ -225,7 +261,7 @@ class TestNode:
                 Symbols.Comma,
                 Symbols.RightPar
             ]
-            assert self.Expr.automaton().find(units) == (self.Expr, 6)
+            assert self.Expr.tree().find(units) == (self.Expr, 6)
     
     class TestAmbiguous:
 
