@@ -45,58 +45,68 @@ class Trie:
         return self.children[key]
 
     # hot mess to pass all tests (especially any)
-    def find(self, items: List, take_first: bool = False) -> Tuple[bool, int]:
+    def find(self, items: List, take_first: bool = False, take_longest: bool = False) -> Tuple[bool, int]:
+
         skip = 1
         ans = False
+
         if not items:
             return (False, 0)
+
         first = items[0]
+        candidates = []
+        
         if (take_first or not items[1:]) and (first in self.leaves or Specials.Any in self.leaves):
-            print(f'found {first} in leaves of {self}')
-            return (True, 1)
+            res = (True, 1)
+            if not take_longest:
+                return res
+            candidates.append((*res, 'early_take_first'))
+
         t = self.children.get(first)
         if t:
             ans, cskip = t.find(items[1:], take_first=take_first)
-            skip += cskip
-            return (ans, skip)
-
-        candidates = []
+            if not take_first:        
+                return (ans, skip + cskip)
+            if ans:
+                candidates.append((ans, cskip, first))
 
         if Specials.Any in self.children:
             ans = take_first
             cans, cskip = self.children[Specials.Any].find(items[1:], take_first=take_first)
             if cskip:
                 ans = cans
-            candidates.append([cans, cskip])
+            candidates.append((cans, cskip, Specials.Any))
 
         if Specials.Empty in self.children:
             cans, cskip = self.children[Specials.Empty].find(items[:], take_first=take_first)
-            candidates.append([cans, cskip - 1])
+            candidates.append((cans, cskip - 1, Specials.Empty))
 
         winner = None
 
         # what if there are two of them ? take shortest or longest ?
         if len(candidates) > 1:
+            print(f'{candidates = }')
             tiniest = None
             longest = None
             truecount = 0
-            for c, size in candidates:
+            for c, size, name in candidates:
                 if c:
                     truecount += 1
                     winner = (c, size)
                     if not tiniest or size < tiniest[1]:
-                        tiniest = (c, size)
+                        tiniest = (c, size, name)
                     if not longest or size > longest[1]:
-                        longest = (c, size)
+                        longest = (c, size, name)
+            print(tiniest, longest, truecount, winner)
             if truecount > 1:
-                winner = tiniest if take_first else longest
+                winner = tiniest if not take_longest else longest
             # FIXME
         else:
             winner = candidates and candidates[0]
         
         if winner:
             print(f'{winner = }, {items = }')
-            cans, cskip = winner
+            cans, cskip, name = winner
             if cskip or cans:
                 ans = cans 
                 skip += cskip
@@ -106,6 +116,8 @@ class Trie:
     def first(self, items):
         return self.find(items, take_first=True)
 
+    def last(self, items):
+        return self.find(items, take_first=True, take_longest=True)
 
 def from_string(pat: str) -> list:
     tokens = pat.split()
@@ -445,5 +457,14 @@ class TestTrie:
         assert t.find([0, 33, 33]) == (False, 1)
         assert t.find([33]) == (True, 1)
         assert t.first([33, 4]) == (True, 1)
+    
+    def test_last(self):
+        t = Trie()
+        #t.insert([33])
+        t.insert([Specials.AnyN, 33])
+        assert t.first([33]) == (True, 1)
+        assert t.first([33, 33]) == (True, 1)
+        assert t.last([33, 33]) == (True, 2)
+
 
 # still need to be able to tell the spans positions captured by any_n
