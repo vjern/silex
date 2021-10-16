@@ -51,15 +51,14 @@ class Trie:
         ans = False
 
         if not items:
-            return (False, 0)
+            return False, 0
 
         first = items[0]
         candidates = []
         
         if (take_first or not items[1:]) and (first in self.leaves or Specials.Any in self.leaves):
-            res = (True, 1)
             if not take_longest:
-                return res
+                return True, 1
             candidates.append((True, 0, 'early_take_first'))
 
         t = self.children.get(first)
@@ -69,48 +68,39 @@ class Trie:
                 return (ans, skip + cskip)
             candidates.append((ans, cskip, first))
 
-        if Specials.Any in self.children:
-            # ans = take_first
-            cans, cskip = self.children[Specials.Any].find(items[1:], take_first=take_first, take_longest=take_longest)
-            # if False and cskip:
-            #     ans = cans
+        t = self.children.get(Specials.Any)
+        if t:
+            cans, cskip = t.find(items[1:], take_first=take_first, take_longest=take_longest)
             candidates.append((cans, cskip, Specials.Any))
 
-        if Specials.Empty in self.children:
-            cans, cskip = self.children[Specials.Empty].find(items[:], take_first=take_first, take_longest=take_longest)
+        t = self.children.get(Specials.Empty)
+        if t:
+            cans, cskip = t.find(items[:], take_first=take_first, take_longest=take_longest)
             candidates.append((cans, cskip - 1, Specials.Empty))
 
         winner = None
 
-        # what if there are two of them ? take shortest or longest ?
-        print(f'{candidates = }')
         if len(candidates) > 1:
-            tiniest = None
+            shortest = None
             longest = None
-            truecount = 0
             for c, size, name in candidates:
                 if c:
-                    truecount += 1
                     winner = (c, size, name)
-                    if not tiniest or size < tiniest[1]:
-                        tiniest = (c, size, name)
+                    if not shortest or size < shortest[1]:
+                        shortest = (c, size, name)
                     if not longest or size > longest[1]:
                         longest = (c, size, name)
-            print(tiniest, longest, truecount, winner)
-            if truecount > 1:
-                winner = tiniest if not take_longest else longest
-            # FIXME
+            winner = longest if take_longest else shortest
         else:
             winner = candidates and candidates[0]
         
         if winner:
-            print(f'{winner = }, {items = }')
             cans, cskip, name = winner
             if cskip or cans:
                 ans = cans 
                 skip += cskip
 
-        return (ans, skip)
+        return ans, skip
 
     def first(self, items):
         return self.find(items, take_first=True)
