@@ -60,39 +60,38 @@ class Trie:
             res = (True, 1)
             if not take_longest:
                 return res
-            candidates.append((*res, 'early_take_first'))
+            candidates.append((True, 0, 'early_take_first'))
 
         t = self.children.get(first)
         if t:
             ans, cskip = t.find(items[1:], take_first=take_first)
             if not take_first:        
                 return (ans, skip + cskip)
-            if ans:
-                candidates.append((ans, cskip, first))
+            candidates.append((ans, cskip, first))
 
         if Specials.Any in self.children:
-            ans = take_first
-            cans, cskip = self.children[Specials.Any].find(items[1:], take_first=take_first)
-            if cskip:
-                ans = cans
+            # ans = take_first
+            cans, cskip = self.children[Specials.Any].find(items[1:], take_first=take_first, take_longest=take_longest)
+            # if False and cskip:
+            #     ans = cans
             candidates.append((cans, cskip, Specials.Any))
 
         if Specials.Empty in self.children:
-            cans, cskip = self.children[Specials.Empty].find(items[:], take_first=take_first)
+            cans, cskip = self.children[Specials.Empty].find(items[:], take_first=take_first, take_longest=take_longest)
             candidates.append((cans, cskip - 1, Specials.Empty))
 
         winner = None
 
         # what if there are two of them ? take shortest or longest ?
+        print(f'{candidates = }')
         if len(candidates) > 1:
-            print(f'{candidates = }')
             tiniest = None
             longest = None
             truecount = 0
             for c, size, name in candidates:
                 if c:
                     truecount += 1
-                    winner = (c, size)
+                    winner = (c, size, name)
                     if not tiniest or size < tiniest[1]:
                         tiniest = (c, size, name)
                     if not longest or size > longest[1]:
@@ -465,6 +464,13 @@ class TestTrie:
         assert t.first([33]) == (True, 1)
         assert t.first([33, 33]) == (True, 1)
         assert t.last([33, 33]) == (True, 2)
+        assert t.last([33, 33, 33]) == (True, 3)
+        assert t.last([33, 33, 33, 4]) == (True, 3)
+
+        t = Trie()
+        t.insert([Specials.Empty, 33])
+        assert t.first([33]) == (True, 1)
+        assert t.last([33]) == (True, 1)
 
 
 # still need to be able to tell the spans positions captured by any_n
