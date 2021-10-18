@@ -13,8 +13,18 @@ T = TypeVar('T')
 class Synt:
     value: Any
 
+    @classmethod
+    def __class_getitem__(cls, v):
+        class n(cls):
+            value = v
+        return n
+
     def __init__(self, value: Any = None, **kw):
         self.value = value
+        kw = {
+            **{k: None for k in self.__annotations__},
+            **kw
+        }
         for key, value in kw.items():
             setattr(self, key, value)
 
@@ -26,12 +36,12 @@ class Synt:
 
     @classmethod
     def patterns(cls) -> List[List[Enum]]:
-        return [[tree.Specials.Any]]
+        return [[cls.value or tree.Specials.Any]]
     
     @classmethod
     def tree(cls) -> tree.Node:
         start, end = tree.Node(), tree.Node(goal=cls)
-        start >> tree.Specials.Any >> end
+        start >> (cls.value or tree.Specials.Any) >> end
         return start, [end]
 
 
@@ -43,6 +53,7 @@ class Symbols(Enum):
     FuncKeyword = 'fn'
     Comma = ','
     NumberLiteral = r'\d+'
+    Slash = '/'
 
 
 @dataclass
@@ -771,33 +782,52 @@ class SyntUnion(Synt):
     candidates: List[Type[Synt]]
 
     @classmethod
+    def __class_getitem__(cls, c):
+        if not isinstance(c, tuple):
+            c = (c,)
+        c = list(c)
+        for i, item in enumerate(c):
+            if isinstance(item, Enum):
+                item = Synt[item]
+            c[i] = item
+        class n(cls):
+            candidates = c
+        n.__name__ = 'SyntUnion'
+        return n
+
+    @classmethod
     def build(cls):
-        from trie import Trie
         if hasattr(cls, 'tries'):
             return
         cls.tries = {
-            c: Trie().init(*c.patterns())
+            c: c.tree()[0]
             for c in cls.candidates
         }
 
     @classmethod
-    def parse(cls, units):
+    def detect(cls, units):
 
         # build a trie out of each candidate's pattern
         cls.build()
 
         # take the longest result
-
         result = None
         maxsize = 0
 
         for c, trie in cls.tries.items():
-            found, size = trie.find(units)
+            found, size = trie.last(units)
             if found and size > maxsize:
                 maxsize = size
                 result = c
 
         return result
+
+    @classmethod
+    def parse(cls, units):
+        p = cls.detect([u.type for u in units])
+        if p is None:
+            return 0, None
+        return p.parse(units)
 
 
 class TestUnion:
@@ -812,8 +842,50 @@ class TestUnion:
             [Symbols.Ident, Symbols.Ident]
         ]
 
-        class IdentOrVar(SyntUnion):
-            candidates = [Var, Symbols.Ident]
+        s = Synt[Symbols.Ident]
+        IdentOrVar = SyntUnion[Var, s]
+        
+        assert IdentOrVar.detect([Symbols.Ident]) == s
+        assert IdentOrVar.detect([Symbols.Ident, Symbols.Ident]) == Var
+
+    def test_nested(self):
+
+        class Rhythm(ASynt):
+            _left: Symbols.Slash
+            value: Symbols.NumberLiteral
+
+        class Note(ASynt):
+            name: Symbols.Ident
+            octave: Optional[Literal[Symbols.NumberLiteral]]
+            alteration: Optional[Literal[Symbols.Ident]]
+            rhythm: Optional[Rhythm]
+
+        U = SyntUnion[Rhythm, Note]
+                
+        units = [
+            lex.Unit('a', Symbols.Ident),
+            lex.Unit('/', Symbols.Slash),
+            lex.Unit('33', Symbols.NumberLiteral),
+            lex.Unit('a', Symbols.Ident)
+        ]
+
+        assert U.detect([u.type for u in units]) == Note
+        r, offset, err = U.parse(units)
+        assert offset == 3
+        assert err is None
+        assert r == Note(
+            name=lex.Unit('a', Symbols.Ident),
+            rhythm=Rhythm(
+                value=lex.Unit('33', Symbols.NumberLiteral)
+            )
+        )
+
+        units = units[1:]
+        assert U.detect([u.type for u in units]) == Rhythm
+        r, offset, err = U.parse(units)
+        assert offset == 2
+        assert err is None
+        assert r == Rhythm(value=lex.Unit('33', Symbols.NumberLiteral))
 
 
 __all__ = ['Synt', 'ASynt', 'Chain', 'ItemList', 'Symbols']
