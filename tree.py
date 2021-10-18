@@ -45,62 +45,64 @@ class Node:
     def first(self, items):
         return self.find(items, take_first=True)
 
-    def find(self, items: List, take_first: bool = False) -> Tuple[bool, int]:
+    def find(self, items: List, take_first: bool = False, take_longest: bool = False) -> Tuple[bool, int]:
+
         skip = 1
         ans = False
+
         if not items:
-            return (False, 0)
+            return False, 0
+
         first = items[0]
+        candidates = []
+        
         if (take_first or not items[1:]) and (goal := (self.children.get(first, N).goal or self.children.get(Specials.Any, N).goal)):
-            return (goal, 1)
+            if not take_longest:
+                return goal, 1
+            candidates.append((goal, 0, 'early_take_first'))
+
         t = self.children.get(first)
         if t:
             ans, cskip = t.find(items[1:], take_first=take_first)
-            skip += cskip
-            return (ans, skip)
+            if not take_first:        
+                return (ans, skip + cskip)
+            candidates.append((ans, cskip, first))
 
-        candidates = []
+        t = self.children.get(Specials.Any)
+        if t:
+            cans, cskip = t.find(items[1:], take_first=take_first, take_longest=take_longest)
+            candidates.append((cans, cskip, Specials.Any))
 
-        if Specials.Any in self.children:
-            ans = take_first
-            cans, cskip = self.children[Specials.Any].find(items[1:], take_first=take_first)
-            if cskip:
-                ans = cans
-            candidates.append([cans, cskip])
-
-        if Specials.Empty in self.children:
-            cans, cskip = self.children[Specials.Empty].find(items[:], take_first=take_first)
-            candidates.append([cans, cskip - 1])
+        t = self.children.get(Specials.Empty)
+        if t:
+            cans, cskip = t.find(items[:], take_first=take_first, take_longest=take_longest)
+            candidates.append((cans, cskip - 1, Specials.Empty))
 
         winner = None
 
-        # what if there are two of them ? take shortest or longest ?
         if len(candidates) > 1:
-            tiniest = None
+            shortest = None
             longest = None
-            truecount = 0
-            for c, size in candidates:
+            for c, size, name in candidates:
                 if c:
-                    truecount += 1
-                    winner = (c, size)
-                    if not tiniest or size < tiniest[1]:
-                        tiniest = (c, size)
+                    winner = (c, size, name)
+                    if not shortest or size < shortest[1]:
+                        shortest = (c, size, name)
                     if not longest or size > longest[1]:
-                        longest = (c, size)
-            if truecount > 1:
-                winner = tiniest if take_first else longest
+                        longest = (c, size, name)
+            winner = longest if take_longest else shortest
         else:
             winner = candidates and candidates[0]
-
+        
         if winner:
-            cans, cskip = winner
+            cans, cskip, name = winner
             if cskip or cans:
                 ans = cans 
                 skip += cskip
 
-        return (ans, skip)
+        return ans, skip
 
-    
+
     def __or__(self, node):
         return Node(children={Specials.Empty: [self, node]})
 
