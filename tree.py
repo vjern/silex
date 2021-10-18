@@ -31,13 +31,14 @@ N = Mock(goal=None)
 
 @dataclass
 class Node:
+    name: str = None
     goal: Any = None  # if provided, should evaluate to True
     children: Dict[Union[Enum, Specials, None], 'Node'] = field(default_factory=dict)
-    name: str = None
 
     @classmethod
     def make(cls, n: int):
-        return [cls() for i in range(n)]
+        import string
+        return [cls(name=l) for l in string.ascii_lowercase[:n]]
 
     def __rshift__(self, charge):
         return Rshifter(self, charge)

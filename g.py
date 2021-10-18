@@ -32,7 +32,7 @@ class Synt:
     def tree(cls) -> tree.Node:
         start, end = tree.Node(), tree.Node(goal=cls)
         start >> tree.Specials.Any >> end
-        return start
+        return start, [end]
 
 
 class Symbols(Enum):
@@ -107,7 +107,15 @@ class Chain(Synt, Generic[T]):
 
     @classmethod
     def patterns(cls):
-        pass
+        raise NotImplementedError
+    
+    @classmethod
+    def tree(cls):
+        t, ends = cls.T.tree()
+        for e in ends:
+            e.goal = cls
+            e.children[tree.Specials.Empty] = t
+        return t, ends
 
 
 class ASynt(Synt):
@@ -189,11 +197,12 @@ class ASynt(Synt):
     @classmethod
     def tree(cls):
         start = tree.Node()
+        ends = []
         for pat in cls.patterns():
             if not pat:
                 continue
-            start >> pat >> tree.Node(goal=cls)
-        return start
+            ends.append(start >> pat >> tree.Node(goal=cls))
+        return start, ends
 
 
 class TestASynt:
@@ -353,21 +362,21 @@ class TestASynt:
         root = tree.Node()
         leaf = tree.Node(goal=TypeExpr)
         root >> Symbols.Ident >> leaf
-        t = TypeExpr.tree()
+        t, ends = TypeExpr.tree()
         assert root == t
         assert t.last(units) == (TypeExpr, 1)
 
         root = tree.Node()
         leaf = tree.Node(goal=Param)
         root >> (Symbols.Ident, Symbols.Ident) >> leaf
-        t = Param.tree()
+        t, ends = Param.tree()
         assert root == t
         assert t.last(units) == (Param, 2)
 
         root = tree.Node()
         leaf = tree.Node(goal=Func)
         root >> (Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident) >> leaf
-        t = Func.tree()
+        t, ends = Func.tree()
         assert root == t
         assert t.last(units) == (Func, 4)
 
@@ -508,7 +517,7 @@ class TestASynt:
                 Symbols.NumberLiteral: c
             }
 
-            t = self.Arg.tree()
+            t, ends = self.Arg.tree()
             a.print()
             t.print()
             assert a.assert_equals(t)
@@ -538,7 +547,7 @@ class TestASynt:
             }
             c.children = { Symbols.RightPar: d }
 
-            t = B.tree()
+            t, ends = B.tree()
             a.print()
             t.print()
             assert a.assert_equals(t)
@@ -664,6 +673,97 @@ class TestChain:
             TypeExpr(name=lex.Unit('b', Symbols.Ident)),
             TypeExpr(name=lex.Unit('a', Symbols.Ident))
         ]
+    
+    def test_patterns(self):
+        import pytest
+        with pytest.raises(NotImplementedError):
+            Chain.patterns()
+
+    def test_tree(self):
+
+        class TypeExpr(ASynt):
+            name: Symbols.Ident
+        
+        c = Chain[TypeExpr]
+        t, ends = c.tree()
+
+        a, b = tree.Node(),tree.Node(goal=TypeExpr)
+        a.children = {
+            Symbols.Ident: b
+        }
+
+        tet, _ = TypeExpr.tree()
+        assert tet.assert_equals(a)
+
+        a.children[Symbols.Ident].children = { tree.Specials.Empty: a }
+        a.children[Symbols.Ident].goal = c
+        # assert t.assert_equals(a)  # FIXME recursive error
+
+        assert t.last([Symbols.Ident]) == (c, 1)
+        assert t.last([Symbols.Ident, Symbols.Ident]) == (c, 2)
+        assert t.last([Symbols.Ident, Symbols.Ident, Symbols.NumberLiteral]) == (c, 2)
+    
+    def test_tree_nested(self):
+
+        class Rhythm(ASynt):
+            _left: Symbols.LeftPar
+            value: Symbols.NumberLiteral
+
+        class Note(ASynt):
+            name: Symbols.Ident
+            octave: Optional[Literal[Symbols.NumberLiteral]]
+            alteration: Optional[Literal[Symbols.Ident]]
+            rhythm: Optional[Rhythm]
+        
+        t, ends = Note.tree()
+
+        a, b, c, d, e, f, g, h, i, j, k, l, m = tree.Node.make(13)
+        for n in (b,c, d, f, h, i, k, m):
+            n.goal = Note
+
+        a.children = { Symbols.Ident: b }
+        g.children = { Symbols.NumberLiteral: h }
+        e.children = { Symbols.NumberLiteral: f }
+        l.children = { Symbols.NumberLiteral: m }
+        j.children = { Symbols.NumberLiteral: k }
+        b.children = {
+            Symbols.NumberLiteral: c,
+            Symbols.Ident: d,
+            Symbols.LeftPar: e,
+        }
+        c.children = {
+            Symbols.Ident: i,
+            Symbols.LeftPar: l,
+        }
+        d.children = { Symbols.LeftPar: g }
+        i.children = { Symbols.LeftPar: j }
+
+        # # Ideal version
+        # a, b, c, d, e, f = tree.Note.make(6)
+        # a.children = { Symbols.Ident: b }
+        # b.children = {
+        #     Symbols.NumberLiteral: c,
+        #     Symbols.Ident: d,
+        #     Symbols.LeftPar: e
+        # }
+        # c.children = {
+        #     Symbols.Ident: d,
+        #     Symbols.LeftPar: e
+        # }
+        # d.children = { Symbols.LeftPar: e }
+        # e.children = { Symbols.NumberLiteral: f }
+        
+        a.print()
+        t.print()
+
+        assert t.assert_equals(a)
+
+        assert t.last([Symbols.Ident]) == (Note, 1)
+        assert t.last([Symbols.Ident, Symbols.Ident]) == (Note, 2)
+        assert t.last([Symbols.Ident, Symbols.NumberLiteral]) == (Note, 2)
+        assert t.last([Symbols.Ident, Symbols.NumberLiteral, Symbols.Ident]) == (Note, 3)
+        assert t.last([Symbols.Ident, Symbols.NumberLiteral, Symbols.Ident, Symbols.LeftPar]) == (Note, 3)
+        assert t.last([Symbols.Ident, Symbols.NumberLiteral, Symbols.Ident, Symbols.LeftPar, Symbols.NumberLiteral]) == (Note, 5)
 
 
 @dataclass
