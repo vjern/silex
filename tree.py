@@ -81,7 +81,7 @@ class Node:
 
         t = self.children.get(first)
         if t:
-            ans, cskip = t.find(items[1:], take_first=take_first)
+            ans, cskip = t.find(items[1:], take_first=take_first, take_longest=take_longest)
             if not take_first:        
                 return (ans, skip + cskip)
             candidates.append((ans, cskip, first))
