@@ -191,7 +191,9 @@ class ASynt(Synt):
         start = tree.Node()
         end   = tree.Node(goal=cls)
         for pat in cls.patterns():
-            start >> pat >> end
+            if not pat:
+                continue
+            start >> pat >> tree.Node(goal=cls)
         return start, end
 
 
@@ -355,7 +357,7 @@ class TestASynt:
         t, end = TypeExpr.tree()
         assert root == t
         assert leaf == end
-        assert t.first(units) == (TypeExpr, 1)
+        assert t.last(units) == (TypeExpr, 1)
 
         root = tree.Node()
         leaf = tree.Node(goal=Param)
@@ -363,7 +365,7 @@ class TestASynt:
         t, end = Param.tree()
         assert root == t
         assert leaf == end
-        assert t.first(units) == (Param, 2)
+        assert t.last(units) == (Param, 2)
 
         root = tree.Node()
         leaf = tree.Node(goal=Func)
@@ -371,7 +373,7 @@ class TestASynt:
         t, end = Func.tree()
         assert root == t
         assert leaf == end
-        assert t.first(units) == (Func, 4)
+        assert t.last(units) == (Func, 4)
 
     class TestOptional:
 
@@ -498,23 +500,27 @@ class TestASynt:
             ]
         
         def test_tree(self):
-            root = tree.Node()
-            leaf = tree.Node(goal=self.Arg)
-            root.children = {
-                tree.Specials.Empty: leaf,
-                Symbols.Ident: leaf,
-                Symbols.NumberLiteral: leaf,
+            a, b, c, d = tree.Node.make(4)
+            b.goal = c.goal = d.goal = self.Arg
+
+            a.children = {
+                Symbols.Ident: b,
+                Symbols.NumberLiteral: d
             }
+
+            b.children = {
+                Symbols.NumberLiteral: c
+            }
+
             t, end = self.Arg.tree()
-            assert root == t
-            assert leaf == end
-            assert t.first([]) == (False, 0)  # you can't have empty patterns anyway
-            assert t.first([Symbols.Ident]) == (self.Arg, 1)
-            assert t.first([Symbols.NumberLiteral]) == (self.Arg, 1)
-            assert t.first([Symbols.Ident, Symbols.NumberLiteral]) == (self.Arg, 2)
-            # FIXME ^ this isn't supported by trie. you can only find the shortest pattern or a pattern that matches the entire array.
-            assert t.first([Symbols.NumberLiteral, Symbols.Ident]) == (False, 2)
-            # why not just use .parse in the end ? take the longest skip
+            a.print()
+            t.print()
+            assert a.assert_equals(t)
+            assert t.last([]) == (False, 0)  # you can't have empty patterns anyway
+            assert t.last([Symbols.Ident]) == (self.Arg, 1)
+            assert t.last([Symbols.NumberLiteral]) == (self.Arg, 1)
+            assert t.last([Symbols.Ident, Symbols.NumberLiteral]) == (self.Arg, 2)
+            assert t.last([Symbols.NumberLiteral, Symbols.Ident]) == (self.Arg, 1)
 
 class TestItemList:
 

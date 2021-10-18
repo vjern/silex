@@ -32,9 +32,12 @@ N = Mock(goal=None)
 @dataclass
 class Node:
     goal: Any = None  # if provided, should evaluate to True
-    leaves: Set[Any] = field(default_factory=set)
     children: Dict[Union[Enum, Specials, None], 'Node'] = field(default_factory=dict)
     name: str = None
+
+    @classmethod
+    def make(cls, n: int):
+        return [cls() for i in range(n)]
 
     def __rshift__(self, charge):
         return Rshifter(self, charge)
@@ -44,6 +47,20 @@ class Node:
 
     def first(self, items):
         return self.find(items, take_first=True)
+    
+    def last(self, items):
+        return self.find(items, take_first=True, take_longest=True)
+    
+    def assert_equals(self, node):
+        if node is self:
+            return True
+        assert self.goal == node.goal, (self.goal, node.goal)
+        assert self.children.keys() == node.children.keys(), (self.children.keys(), node.children.keys())
+        assert all(
+            self.children[key].assert_equals(node.children[key])
+            for key in self.children.keys()
+        )
+        return True
 
     def find(self, items: List, take_first: bool = False, take_longest: bool = False) -> Tuple[bool, int]:
 
@@ -92,12 +109,12 @@ class Node:
                         longest = (c, size, name)
             winner = longest if take_longest else shortest
         else:
-            winner = candidates and candidates[0]
+            winner = candidates and candidates[0] or None
         
         if winner:
             cans, cskip, name = winner
             if cskip or cans:
-                ans = cans 
+                ans = cans
                 skip += cskip
 
         return ans, skip
@@ -126,17 +143,21 @@ class Rshifter:
         self.op = op
 
     def __rshift__(self, right):
-
         if not self.op:
             self.op = [Specials.Empty]
-
         node = self.left
         for op in self.op[:-1]:
             child = node.children.get(op, Node())
             node.children[op] = child
             node = child
         op = self.op[-1]
-        node.children[op] = right
+        r = node.children.get(op)
+        if r and r is not right:
+            if not right.goal:
+                right.goal = r.goal
+            assert not right.children.keys() & r.children.keys(), 'Cannot merge nodes with overlapping edges'
+            right.children.update(r.children)
+        node.children[op] = right  # this is the culprit; it doesn't check if op is already in children
         return right
 
 
@@ -216,6 +237,25 @@ class TestNode:
         }
 
         assert end.children == {}
+
+    def test_composite(self):
+        
+        pats = [
+            [Symbols.Ident, Symbols.NumberLiteral],
+            [Symbols.NumberLiteral],
+            [Symbols.Ident],
+        ]
+
+        a = Node()
+
+        for p in pats:
+            a >> p >> Node(goal=Node)
+            print(p)
+            a.print()
+        
+        a.print()
+        assert a.children[Symbols.Ident].children.keys() == {Symbols.NumberLiteral}
+
 
     class TestFind:
 
