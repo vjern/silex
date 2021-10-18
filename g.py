@@ -32,7 +32,7 @@ class Synt:
     def tree(cls) -> tree.Node:
         start, end = tree.Node(), tree.Node(goal=cls)
         start >> tree.Specials.Any >> end
-        return start, end
+        return start
 
 
 class Symbols(Enum):
@@ -189,12 +189,11 @@ class ASynt(Synt):
     @classmethod
     def tree(cls):
         start = tree.Node()
-        end   = tree.Node(goal=cls)
         for pat in cls.patterns():
             if not pat:
                 continue
             start >> pat >> tree.Node(goal=cls)
-        return start, end
+        return start
 
 
 class TestASynt:
@@ -354,25 +353,22 @@ class TestASynt:
         root = tree.Node()
         leaf = tree.Node(goal=TypeExpr)
         root >> Symbols.Ident >> leaf
-        t, end = TypeExpr.tree()
+        t = TypeExpr.tree()
         assert root == t
-        assert leaf == end
         assert t.last(units) == (TypeExpr, 1)
 
         root = tree.Node()
         leaf = tree.Node(goal=Param)
         root >> (Symbols.Ident, Symbols.Ident) >> leaf
-        t, end = Param.tree()
+        t = Param.tree()
         assert root == t
-        assert leaf == end
         assert t.last(units) == (Param, 2)
 
         root = tree.Node()
         leaf = tree.Node(goal=Func)
         root >> (Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident) >> leaf
-        t, end = Func.tree()
+        t = Func.tree()
         assert root == t
-        assert leaf == end
         assert t.last(units) == (Func, 4)
 
     class TestOptional:
@@ -512,7 +508,7 @@ class TestASynt:
                 Symbols.NumberLiteral: c
             }
 
-            t, end = self.Arg.tree()
+            t = self.Arg.tree()
             a.print()
             t.print()
             assert a.assert_equals(t)
@@ -521,6 +517,36 @@ class TestASynt:
             assert t.last([Symbols.NumberLiteral]) == (self.Arg, 1)
             assert t.last([Symbols.Ident, Symbols.NumberLiteral]) == (self.Arg, 2)
             assert t.last([Symbols.NumberLiteral, Symbols.Ident]) == (self.Arg, 1)
+
+        def test_tree_nested(self):
+        
+            class A(ASynt):
+                name: Symbols.Ident
+            
+            class B(ASynt):
+                _left: Symbols.LeftPar
+                a: Optional[A]
+                _right: Symbols.RightPar
+
+            a, b, c, d, e = tree.Node.make(5)
+            d.goal = e.goal = B
+
+            a.children = { Symbols.LeftPar: b }
+            b.children = {
+                Symbols.Ident: c,
+                Symbols.RightPar: e
+            }
+            c.children = { Symbols.RightPar: d }
+
+            t = B.tree()
+            a.print()
+            t.print()
+            assert a.assert_equals(t)
+            assert t.last([Symbols.LeftPar, Symbols.RightPar]) == (B, 2)
+            assert t.last([Symbols.LeftPar, Symbols.Ident, Symbols.RightPar]) == (B, 3)
+            assert t.last([Symbols.LeftPar, Symbols.Ident, Symbols.NumberLiteral]) == (False, 3)
+            assert t.last([Symbols.LeftPar, Symbols.NumberLiteral, Symbols.RightPar]) == (False, 2)
+
 
 class TestItemList:
 
