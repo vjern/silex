@@ -55,7 +55,7 @@ class Node:
     def assert_equals(self, node):
         if node is self:
             return True
-        assert self.goal == node.goal, (self.goal, node.goal)
+        assert self.goal == node.goal, (self.goal, node.goal, self, node)
         assert self.children.keys() == node.children.keys(), (self.children.keys(), node.children.keys())
         assert all(
             self.children[key].assert_equals(node.children[key])
@@ -120,9 +120,9 @@ class Node:
 
         return ans, skip
 
-
     def __or__(self, node):
-        return Node(children={Specials.Empty: [self, node]})
+        # return Node(children={Specials.Empty: [self, node]})
+        return self.merge(node)
 
     def print(self, depth: int = 0, indent: int = 2, key: str = None, history: set = set()):
         if self in history:
@@ -133,6 +133,16 @@ class Node:
             value.print(depth + 1, key=key, history={*history, self})
         if len(self.children):
             print(' ' * depth * indent + '}')
+    
+    def merge(self, node):
+        n = Node()
+        if self.goal and node.goal and self.goal != node.goal:
+            raise Exception('Conflicting goals')
+        n.goal = self.goal or node.goal
+        n.children = {**self.children, **node.children}
+        for common in self.children.keys() & node.children.keys():
+            n.children[common] = self.children[common].merge(node.children[common])
+        return n
 
 
 class Rshifter:
@@ -349,3 +359,53 @@ class TestNode:
 
             # assert (parexpr.start | parlist.start).find(units_parlist) == ('parlist', 4)
             # assert (parexpr.start | parlist.start).find(units_parexpr) == ('parexpr', 3)
+
+    class TestMerge:
+
+        def test_basic(self):
+            a = Node(goal=int)
+            b = Node()
+            n = Node.merge(a, b)
+            assert n.goal is int
+            assert n.children == {}
+        
+        def test_simple(self):
+            
+            a, b, c = Node.make(3)
+            a.goal = int
+            c.goal = str
+            a.children = { 1: b, 2: c }
+
+            d, e = Node.make(2)
+            e.goal = int
+            d.children = { 3: e }
+
+            n = a.merge(d)
+
+            assert n.children == {
+                1: b, 2: c, 3: e
+            }
+        
+        def test_overlap(self):
+            
+            a, b, c = Node.make(3)
+            a.goal = int
+            c.goal = str
+            a.children = { 1: b, 2: c }
+
+            d, e, f = Node.make(3)
+            f.goal = int
+            d.children = { 2: e }
+            e.children = { 3: f }
+
+            # c & e get merged
+            n = a.merge(d)
+
+            assert n.children == {
+                1: b,
+                2: Node(
+                    goal=str,
+                    children={
+                        3: f
+                })
+            }

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, Union
+from typing import Dict, Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, Union
 import typing
 
 import lex
@@ -13,10 +13,16 @@ T = TypeVar('T')
 class Synt:
     value: Any
 
+    _templated: Dict[Any, Type['Synt']] = {}
+
     @classmethod
     def __class_getitem__(cls, v):
+        n = cls._templated.get(v)
+        if n is not None:
+            return n
         class n(cls):
             value = v
+        cls._templated[v] = n
         return n
 
     def __init__(self, value: Any = None, **kw):
@@ -810,6 +816,17 @@ class SyntUnion(Synt):
         return list(f())
 
     @classmethod
+    def tree(cls):
+        start = tree.Node()
+        ends = []
+        cls.build()
+        for c in cls.candidates:
+            s, e = c.tree()
+            start |= s
+            ends.extend(e)
+        return start, ends
+
+    @classmethod
     def build(cls):
         if hasattr(cls, 'tries'):
             return
@@ -902,12 +919,29 @@ class TestUnion:
         assert r == Rhythm(value=lex.Unit('33', Symbols.NumberLiteral))
 
     def test_patterns(self):
-
         U = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
         assert U.patterns() == [
             [Symbols.Ident],
             [Symbols.NumberLiteral]
         ]
+
+    def test_tree(self):
+        U = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
+        t, ends = U.tree()
+
+        a, b, c = tree.Node.make(3)
+        b.goal = Synt[Symbols.Ident]
+        c.goal = Synt[Symbols.NumberLiteral]
+        a.children = { Symbols.Ident: b, Symbols.NumberLiteral: c }
+
+        t.print()
+        a.print()
+
+        assert t.assert_equals(a)
+        assert all(a.assert_equals(b) for a, b in zip(ends, [b, c]))
+
+    def test_tree_nested(self):
+        pass
 
     def test_downstream(self):
 
