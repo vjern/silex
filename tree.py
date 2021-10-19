@@ -52,13 +52,15 @@ class Node:
     def last(self, items):
         return self.find(items, take_first=True, take_longest=True)
     
-    def assert_equals(self, node):
+    def assert_equals(self, node, history: set = set()):
+        if self in history:
+            return True
         if node is self:
             return True
         assert self.goal == node.goal, (self.goal, node.goal, self, node)
         assert self.children.keys() == node.children.keys(), (self.children.keys(), node.children.keys())
         assert all(
-            self.children[key].assert_equals(node.children[key])
+            self.children[key].assert_equals(node.children[key], {*history, self})
             for key in self.children.keys()
         )
         return True
