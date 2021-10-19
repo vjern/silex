@@ -198,11 +198,17 @@ class ASynt(Synt):
                         pats.append(list(p))
                     p.append(value)
             else:
-                for p in value.patterns():
-                    for i, q in enumerate(list(pats)):
-                        pats[i] = [*q, *p]
-                        if not required:
-                            pats.append(list(q))
+                value_pats = value.patterns()
+                if not value_pats:
+                    continue
+                for i, q in enumerate(list(pats)):
+                    first = value_pats[0]
+                    pats[i] = [*q, *first]
+                    for p in value_pats[1:]:
+                        pats.append([*q, *p])
+                    if not required:
+                        pats.append(list(q))
+                
         return pats
 
     @classmethod
@@ -796,6 +802,14 @@ class SyntUnion(Synt):
         return n
 
     @classmethod
+    def patterns(cls):
+        cls.build()
+        def f():
+            for c in cls.candidates:
+                yield from c.patterns() 
+        return list(f())
+
+    @classmethod
     def build(cls):
         if hasattr(cls, 'tries'):
             return
@@ -886,6 +900,37 @@ class TestUnion:
         assert offset == 2
         assert err is None
         assert r == Rhythm(value=lex.Unit('33', Symbols.NumberLiteral))
+
+    def test_patterns(self):
+
+        U = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
+        assert U.patterns() == [
+            [Symbols.Ident],
+            [Symbols.NumberLiteral]
+        ]
+
+    def test_downstream(self):
+
+        U = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
+
+        class A(ASynt):
+            _aaa: Symbols.LeftBracket
+            name: Symbols.Ident
+            deal: U
+            _bbb: Symbols.RightBracket
+
+        assert A.patterns() == [
+            [Symbols.LeftBracket, Symbols.Ident, *[Symbols.Ident],         Symbols.RightBracket],
+            [Symbols.LeftBracket, Symbols.Ident, *[Symbols.NumberLiteral], Symbols.RightBracket]
+        ]
+
+    def test_chain(self):
+
+        Instruction = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
+        Block = Chain[Instruction]
+
+
+
 
 
 __all__ = ['Synt', 'ASynt', 'Chain', 'ItemList', 'Symbols']
