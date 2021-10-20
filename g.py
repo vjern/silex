@@ -919,6 +919,7 @@ class TestUnion:
         assert r == Rhythm(value=lex.Unit('33', Symbols.NumberLiteral))
 
     def test_patterns(self):
+
         U = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
         assert U.patterns() == [
             [Symbols.Ident],
@@ -926,6 +927,7 @@ class TestUnion:
         ]
 
     def test_tree(self):
+
         U = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
         t, ends = U.tree()
 
@@ -940,31 +942,85 @@ class TestUnion:
         assert t.assert_equals(a)
         assert all(a.assert_equals(b) for a, b in zip(ends, [b, c]))
 
+        assert t.last([Symbols.Ident]) == (Synt[Symbols.Ident], 1)
+        assert t.last([Symbols.Ident, Symbols.NumberLiteral]) == (Synt[Symbols.Ident], 1)
+        assert t.last([Symbols.NumberLiteral]) == (Synt[Symbols.NumberLiteral], 1)
+
     def test_tree_nested(self):
-        pass
-
-    def test_downstream(self):
-
-        U = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
+        
+        class B(ASynt):
+            value: Symbols.Ident
+            type: Symbols.Ident
 
         class A(ASynt):
-            _aaa: Symbols.LeftBracket
-            name: Symbols.Ident
-            deal: U
-            _bbb: Symbols.RightBracket
+            value: SyntUnion[B, Symbols.NumberLiteral]
+        
+        class X(ASynt):
+            a: A
+            b: Symbols.NumberLiteral
+        
+        t, ends = X.tree()
 
-        assert A.patterns() == [
-            [Symbols.LeftBracket, Symbols.Ident, *[Symbols.Ident],         Symbols.RightBracket],
-            [Symbols.LeftBracket, Symbols.Ident, *[Symbols.NumberLiteral], Symbols.RightBracket]
-        ]
+        a, b, c, d, e, f = tree.Node.make(6)
+        e.goal = f.goal = X
+
+        a.children = { Symbols.Ident: b, Symbols.NumberLiteral: c }
+        b.children = { Symbols.Ident: d }
+        c.children = { Symbols.NumberLiteral: f }
+        d.children = { Symbols.NumberLiteral: e }
+
+        assert a.assert_equals(t)
+        assert all(a.assert_equals(b) for a, b in zip(ends, [e, f]))
+
+        assert t.last([Symbols.Ident, Symbols.Ident, Symbols.NumberLiteral]) == (X, 3)
+        assert t.last([Symbols.NumberLiteral, Symbols.NumberLiteral]) == (X, 2)
+        assert t.last([Symbols.Ident, Symbols.NumberLiteral, Symbols.NumberLiteral]) == (False, 2)
+
+        r, offset, err = X.parse([lex.Unit("a", Symbols.Ident), lex.Unit("b", Symbols.Ident), lex.Unit(None, Symbols.NumberLiteral)])
+        assert offset == 3
+        assert err is None
+        assert r == X(
+            a=A(
+                value=B(
+                    value=lex.Unit("a", Symbols.Ident),
+                    type=lex.Unit("b", Symbols.Ident),
+                )
+            ),
+            b=lex.Unit(None, Symbols.NumberLiteral)
+        )
+
+        r, offset, err = X.parse([lex.Unit('33', Symbols.NumberLiteral), lex.Unit('333', Symbols.NumberLiteral)])
+        assert offset == 2
+        assert err is None
+        assert r == X(
+            a=A(
+                value=lex.Unit('33', Symbols.NumberLiteral)
+            ),
+            b=lex.Unit('333', Symbols.NumberLiteral)
+        )
 
     def test_chain(self):
 
         Instruction = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
         Block = Chain[Instruction]
 
+        # first, tree
+        t, ends = Block.tree()
 
+        a, b, c = tree.Node.make(3)
+        b.goal = c.goal = Block
+        a.children = { Symbols.Ident: b, Symbols.NumberLiteral: c }
+        b.children = c.children = { tree.Specials.Empty: a }
 
+        assert a.assert_equals(t)
+
+        units = [lex.Unit('a', Symbols.Ident), lex.Unit('b', Symbols.Ident), lex.Unit('11', Symbols.NumberLiteral)]
+        assert t.last([u.type for u in units]) == (Block, 3)
+
+        r, offset, err = Block.parse(units)
+        assert offset == 3
+        assert err is None
+        assert r == units   
 
 
 __all__ = ['Synt', 'ASynt', 'Chain', 'ItemList', 'Symbols']
