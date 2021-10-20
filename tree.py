@@ -40,6 +40,9 @@ class Node:
         import string
         return [cls(name=l) for l in string.ascii_lowercase[:n]]
 
+    def __eq__(self, node):
+        return self.goal == node.goal and self.children == node.children
+
     def __rshift__(self, charge):
         return Rshifter(self, charge)
 
@@ -136,8 +139,10 @@ class Node:
         if len(self.children):
             print(' ' * depth * indent + '}')
     
-    def merge(self, node):
+    def merge(self, node, inplace: bool = False):
         n = Node()
+        if inplace:
+            n = self
         if self.goal and node.goal and self.goal != node.goal:
             raise Exception('Conflicting goals')
         n.goal = self.goal or node.goal
