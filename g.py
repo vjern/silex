@@ -22,20 +22,38 @@ def resolve_raw_forward_ref(name: str, modulename: str, ctx: dict = None) -> typ
     return result or getattr(module, name, None)
 
 
-class Synt:
-    value: Any
+class SyntGeneric(Generic[T]):
 
-    _templated: Dict[Any, Type['Synt']] = {}
+    _templated = {}
+    
+    @classmethod
+    def __class_template__(cls, t) -> Tuple[str, Tuple[type, ...], dict]:
+        return '%s<%s>' % (cls.__name__, getattr(t, '__name__', str(t))), (cls,), {'T': t}
 
     @classmethod
-    def __class_getitem__(cls, v):
-        n = cls._templated.get(v)
+    def __class_getitem__(cls, t):
+        n = cls._templated.get((cls, t))
         if n is not None:
             return n
-        class n(cls):
-            value = v
-        cls._templated[v] = n
+        n = cls._templated[cls, t] = type(*cls.__class_template__(t))
         return n
+
+
+class TestSyntGeneric:
+
+    def test_basic(self):
+        T = int
+        s = SyntGeneric[T]
+        d = SyntGeneric[T]
+        assert s.__name__ == 'SyntGeneric<int>'
+        assert s is not SyntGeneric
+        assert s is d
+        assert s.T is T
+
+
+class Synt(SyntGeneric):
+
+    T = None
 
     def __init__(self, value: Any = None, **kw):
         self.value = value
@@ -54,12 +72,12 @@ class Synt:
 
     @classmethod
     def patterns(cls) -> List[List[Enum]]:
-        return [[cls.value or tree.Specials.Any]]
+        return [[cls.T or tree.Specials.Any]]
     
     @classmethod
     def tree(cls) -> tree.Node:
         start, end = tree.Node(), tree.Node(goal=cls)
-        start >> (cls.value or tree.Specials.Any) >> end
+        start >> (cls.T or tree.Specials.Any) >> end
         return start, [end]
 
 
@@ -115,13 +133,9 @@ class ItemList(Synt):
         return getattr(cls, 'base', cls)(items), skip, None
 
 
-class Chain(Synt, Generic[T]):
+class Chain(Synt, SyntGeneric):
 
     T = Synt
-
-    @classmethod
-    def __class_getitem__(cls, target: type):
-        return type(getattr(target, '__name__', getattr(target, 'name', None)) + 'Chain', (cls,), {'T': target})
 
     @classmethod
     def parse(cls, units):
@@ -1098,12 +1112,16 @@ class TestUnion:
         assert r == units   
 
 
-# class TestHard:
+class TestHard:
 
-#     def test_basic(self):
+    def test_basic(self):
 
-#         class Block(ASynt):
-#             _left: Symbols.LeftBracket
-#             _right: Symbols.RightBracket
+        class Block(ASynt):
+            _left: Symbols.LeftBracket
+            instructions: Chain['Instruction']
+            _right: Symbols.RightBracket
         
-#         class Instruction(ASynt):
+        class Instruction(ASynt):
+            value: Symbols.Ident
+        
+        Block.resolve_forward_refs(locals())
