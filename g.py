@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, Union
+from sys import meta_path
+from typing import Dict, ForwardRef, Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, Union
 import typing
 
 import lex
@@ -8,6 +9,17 @@ import tree
 
 
 T = TypeVar('T')
+__all__ = ['Synt', 'ASynt', 'Chain', 'ItemList', 'Symbols']
+
+
+def resolve_raw_forward_ref(name: str, modulename: str, ctx: dict = None) -> type:
+    import sys
+    module = sys.modules[modulename]
+    print(f'{modulename=} {module}')
+    result = None
+    if ctx is not None:
+        result = ctx.get(name)
+    return result or getattr(module, name, None)
 
 
 class Synt:
@@ -150,6 +162,16 @@ class ASynt(Synt):
             if getattr(obj, key) != getattr(self, key):
                 return False
         return True
+    
+    @classmethod
+    def resolve_forward_refs(cls, ctx=None):
+        ants = cls.__annotations__
+        for key, value in ants.items():
+            if isinstance(value, str):
+                value = resolve_raw_forward_ref(value, cls.__module__, ctx)
+            elif isinstance(value, ForwardRef):
+                value = value._evaluate(globals(), ctx)
+            ants[key] = value
 
     @classmethod
     def parse(cls, units):
@@ -196,8 +218,12 @@ class ASynt(Synt):
             required = True
             while isinstance(value, typing._GenericAlias):
                 required = False
+                print('stripping', value)
                 value, *_ = value.__args__
             
+            if isinstance(value, str):
+                value = resolve_raw_forward_ref(value, cls.__module__)
+
             if isinstance(value, Symbols):
                 for p in list(pats):
                     if not required:
@@ -248,6 +274,25 @@ class TestASynt:
         )
         assert offset == 2
         assert err is None
+    
+    def test_forward_refs(self):
+
+        class Assignment(ASynt):
+            name: Symbols.Ident
+            _eq: Symbols.LeftPar
+            value: 'Expr'
+            value2: ForwardRef('Expr')
+
+        class Expr(ASynt):
+            value: Symbols.NumberLiteral
+
+        Assignment.resolve_forward_refs(locals())
+        assert Assignment.__annotations__['value'] is Expr
+        assert Assignment.__annotations__['value2'] is Expr
+
+        assert Assignment.patterns() == [
+            [Symbols.Ident, Symbols.LeftPar, Symbols.NumberLiteral, Symbols.NumberLiteral]
+        ]
 
     def test_patterns(self):
 
@@ -1021,6 +1066,3 @@ class TestUnion:
         assert offset == 3
         assert err is None
         assert r == units   
-
-
-__all__ = ['Synt', 'ASynt', 'Chain', 'ItemList', 'Symbols']
