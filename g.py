@@ -167,10 +167,17 @@ class ASynt(Synt):
     def resolve_forward_refs(cls, ctx=None):
         ants = cls.__annotations__
         for key, value in ants.items():
+            optional = False
+            while isinstance(value, typing._GenericAlias):
+                if value.__origin__ is Union:
+                    optional = True
+                value, *_ = value.__args__
             if isinstance(value, str):
                 value = resolve_raw_forward_ref(value, cls.__module__, ctx)
             elif isinstance(value, ForwardRef):
                 value = value._evaluate(globals(), ctx)
+            if optional:
+                value = Optional[value]
             ants[key] = value
 
     @classmethod
@@ -218,7 +225,6 @@ class ASynt(Synt):
             required = True
             while isinstance(value, typing._GenericAlias):
                 required = False
-                print('stripping', value)
                 value, *_ = value.__args__
             
             if isinstance(value, str):
@@ -623,6 +629,30 @@ class TestASynt:
             assert t.last([Symbols.LeftPar, Symbols.Ident, Symbols.RightPar]) == (B, 3)
             assert t.last([Symbols.LeftPar, Symbols.Ident, Symbols.NumberLiteral]) == (False, 3)
             assert t.last([Symbols.LeftPar, Symbols.NumberLiteral, Symbols.RightPar]) == (False, 2)
+        
+        def test_forward_refs(self):
+
+            class Assignment(ASynt):
+                name: Symbols.Ident
+                _eq: Symbols.LeftPar
+                value: Optional['Expr']
+                value2: Optional[ForwardRef('Expr')]
+
+            class Expr(ASynt):
+                value: Symbols.NumberLiteral
+
+            Assignment.resolve_forward_refs(locals())
+            assert Assignment.__annotations__['value'] is Optional[Expr]
+            assert Assignment.__annotations__['value2'] is Optional[Expr]
+
+            pats = Assignment.patterns()
+            print(len(pats), *pats, sep='\n')
+            assert pats == [
+                [Symbols.Ident, Symbols.LeftPar, Symbols.NumberLiteral, Symbols.NumberLiteral],
+                [Symbols.Ident, Symbols.LeftPar, Symbols.NumberLiteral],
+                [Symbols.Ident, Symbols.LeftPar, Symbols.NumberLiteral],  # odd but makes sense
+                [Symbols.Ident, Symbols.LeftPar],
+            ]
 
 
 class TestItemList:
@@ -1066,3 +1096,14 @@ class TestUnion:
         assert offset == 3
         assert err is None
         assert r == units   
+
+
+# class TestHard:
+
+#     def test_basic(self):
+
+#         class Block(ASynt):
+#             _left: Symbols.LeftBracket
+#             _right: Symbols.RightBracket
+        
+#         class Instruction(ASynt):
