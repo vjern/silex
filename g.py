@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum
+import traceback
 from sys import meta_path
 from typing import Dict, ForwardRef, Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, Union
 import typing
@@ -79,8 +80,7 @@ class Synt(SyntGeneric):
 
     T = None
 
-    def __init__(self, value: Any = None, **kw):
-        self.value = value
+    def __init__(self, **kw):
         kw = {
             **{k: None for k in self.__annotations__},
             **kw
@@ -91,8 +91,11 @@ class Synt(SyntGeneric):
     @classmethod
     def parse(cls, units: List[lex.Unit]) -> Tuple[Union['Synt', lex.Unit], int, Optional[Exception]]:
         if not units:
-            raise ValueError('No units to parse!')
-        return units[0], 1, None
+            return None, 0, ValueError('No units to parse!')
+        unit = units[0]
+        if cls.T is not None and unit.type != cls.T:
+            return None, 0, Exception('Expected %s' % cls.T)
+        return unit, 1, None
 
     @classmethod
     def patterns(cls) -> List[List[Enum]]:
@@ -118,6 +121,10 @@ class Symbols(Enum):
     Comma = ','
     NumberLiteral = r'\d+'
     Slash = '/'
+    Dash = '-'
+    Underscore = '_'
+    Plus = '+'
+    Equals = '='
 
 
 @dataclass
@@ -171,9 +178,13 @@ class Chain(Synt, SyntGeneric):
         objs = []
         while units:
             obj, tskip, err = cls.T.parse(units)
+            if err is not None:
+                break
+            print('success chain', obj)
             objs.append(obj)
             skip += tskip
             units = units[tskip:]
+        print('Chain.parse returns', objs, skip)
         return objs, skip, None
 
     @classmethod
@@ -207,6 +218,7 @@ class ASynt(Synt, ForwardRefResolver):
             if key.startswith('_'):
                 continue
             if getattr(obj, key) != getattr(self, key):
+                breakpoint()
                 return False
         return True
     
@@ -232,11 +244,14 @@ class ASynt(Synt, ForwardRefResolver):
     @classmethod
     def parse(cls, units):
 
+        print(f'{cls.__name__}.parse')
+
         skip = 0
         data = {}
 
         for key, value in cls.__annotations__.items():
 
+            print(f'{units=}')
             required = True
             obj = None
             err = None
@@ -250,20 +265,26 @@ class ASynt(Synt, ForwardRefResolver):
                 if units:
                     obj = units[0]
                     if obj.type != value:
+                        # if required:
+                        #     raise Exception('ga %s %s' % (obj.type, value))
                         obj = None
                     else:
                         tskip = 1
             else:
                 obj, tskip, err = value.parse(units)
+                print('our warriors have returned!', obj, tskip, err, value)
 
-            if required and obj is None:
-                return obj, tskip, err or Exception('Expected %s' % value)
+            if required and (obj is None or err):
+                # breakpoint()
+                return obj, tskip, err or Exception('%s:%s:Expected %s, found %s' % (cls.__name__, key, value, obj))
 
             if not key.startswith('_'):
                 data[key] = obj
+
             skip += tskip
             units = units[tskip:]
 
+        print('about to', cls, data)
         return cls(**data), skip, None
 
     @classmethod
@@ -1121,10 +1142,13 @@ class SyntUnion(Synt):
 
     @classmethod
     def parse(cls, units):
-        p = cls.detect([u.type for u in units])
-        if p is None:
-            return 0, None
-        return p.parse(units)
+        # p = cls.detect([u.type for u in units])
+        for c in cls.candidates:
+            obj, skip, err = c.parse(units)
+            if not err:
+                print(cls, 'found candidate', c, obj,)
+                return (obj, skip, err)
+        return None, 0, Exception('Found no candidate')
 
 
 class TestUnion:
@@ -1290,28 +1314,159 @@ class TestUnion:
         assert r == units   
 
 
-# class TestHard:
+class TestHard:
 
-#     def test_basic(self):
+    def test_basic(self):
 
-#         class Block(ASynt):
-#             _left: Symbols.LeftBracket
-#             instructions: Chain['Instruction']
-#             _right: Symbols.RightBracket
+        class Block(ASynt):
+            _left: Symbols.LeftBracket
+            instructions: Chain['Instruction']
+            _right: Symbols.RightBracket
         
-#         class Instruction(ASynt):
-#             value: SyntUnion[Block, Symbols.Ident]
+        class Instruction(ASynt):
+            value: SyntUnion[Block, Symbols.Ident]
 
-#         Block.resolve_forward_refs(locals())
-#         assert Block.__annotations__['instructions'].T is Instruction
+        Block.resolve_forward_refs(locals())
+        assert Block.__annotations__['instructions'].T is Instruction
 
-#         # t, ends = Block.xtree()
+        units = [
+            lex.Unit('{', Symbols.LeftBracket),
+            lex.Unit('}', Symbols.RightBracket)
+        ]
+
+        r, offset, err = Block.parse(units)
+        assert err is None
+        assert offset == 2
+        assert r == Block(
+            instructions=[]
+        )
+
+        units = [
+            lex.Unit('{', Symbols.LeftBracket),
+            lex.Unit('{', Symbols.LeftBracket),
+            lex.Unit('}', Symbols.RightBracket),
+            lex.Unit('}', Symbols.RightBracket)
+        ]
+
+        r, offset, err = Block.parse(units)
+        assert err is None
+        assert offset == 4
+        assert r == Block(
+            instructions=[
+                Instruction(value=Block(instructions=[]))
+            ]
+        )
+
+        units = [
+            lex.Unit('{', Symbols.LeftBracket),
+            lex.Unit('i', Symbols.Ident),
+            lex.Unit('{', Symbols.LeftBracket),
+            lex.Unit('}', Symbols.RightBracket),
+            lex.Unit('}', Symbols.RightBracket)
+        ]
+
+        r, offset, err = Block.parse(units)
+        assert err is None
+        assert offset == 5
+        assert r == Block(
+            instructions=[
+                Instruction(value=lex.Unit('i', Symbols.Ident)),
+                Instruction(value=Block(instructions=[]))
+            ]
+        )
+
+    def test_advanced(self):
+
+        class Assignment(ASynt):
+            name: Symbols.Ident
+            _eq: Symbols.Equals
+            value: 'Block'
+
+        class Rhythm(ASynt):
+            _left: Symbols.Slash
+            value: Symbols.NumberLiteral
+
+        class Note(ASynt):
+            name: Symbols.Ident
+            octave: Optional[Literal[Symbols.NumberLiteral]]
+            alteration: Optional[SyntUnion[Symbols.Plus, Symbols.Dash]]
+            rhythm: Optional[Rhythm]
+
+        class Block(ASynt):
+            _left: Symbols.LeftBracket
+            instructions: Chain['Instruction']
+            _right: Symbols.RightBracket
         
-#         units = [
-#             lex.Unit('{', Symbols.LeftBracket),
-#             lex.Unit('}', Symbols.RightBracket)
-#         ]
+        class Instruction(ASynt):
+            value: SyntUnion[Block, Symbols.Ident, Note]
 
-#         Block.parse(units)
+        Block.resolve_forward_refs(locals())
+        Assignment.resolve_forward_refs(locals())
 
-#         # assert t.last([u.type for u in units]) == Block
+        units = [
+            lex.Unit('a', Symbols.Ident),
+            lex.Unit('/', Symbols.Slash),
+            lex.Unit('3', Symbols.NumberLiteral)
+        ]
+
+        r, offset, err = Note.parse(units)
+        assert r == Note(
+            name=lex.Unit('a', Symbols.Ident),
+            rhythm=Rhythm(
+                value=lex.Unit('3', Symbols.NumberLiteral)
+            )
+        )
+
+        units = [
+            lex.Unit('a', Symbols.Ident),
+            lex.Unit('4', Symbols.NumberLiteral),
+            lex.Unit('/', Symbols.Slash),
+            lex.Unit('3', Symbols.NumberLiteral)
+        ]
+
+        r, offset, err = Note.parse(units)
+        assert r == Note(
+            name=lex.Unit('a', Symbols.Ident),
+            octave=lex.Unit('4', Symbols.NumberLiteral),
+            rhythm=Rhythm(
+                value=lex.Unit('3', Symbols.NumberLiteral)
+            )
+        )
+    
+        units = [
+            lex.Unit('a', Symbols.Ident),
+            lex.Unit('4', Symbols.NumberLiteral),
+            lex.Unit('+', Symbols.Plus),
+            lex.Unit('/', Symbols.Slash),
+            lex.Unit('3', Symbols.NumberLiteral)
+        ]
+
+        r, offset, err = Note.parse(units)
+        assert r == Note(
+            name=lex.Unit('a', Symbols.Ident),
+            octave=lex.Unit('4', Symbols.NumberLiteral),
+            alteration=lex.Unit('+', Symbols.Plus),
+            rhythm=Rhythm(
+                value=lex.Unit('3', Symbols.NumberLiteral)
+            )
+        )
+
+        units = [
+           lex.Unit('beep', Symbols.Ident),
+           lex.Unit('=', Symbols.Equals),
+           lex.Unit('{', Symbols.LeftBracket),
+           lex.Unit('c', Symbols.Ident),
+           lex.Unit('}', Symbols.RightBracket)
+       ]
+
+        res, offset, err = Assignment.parse(units)
+        ab = Assignment(
+            name=lex.Unit('beep', Symbols.Ident),
+            value=Block(
+                instructions=[Instruction(value=lex.Unit('c', Symbols.Ident))]
+            )
+        )
+        breakpoint()
+        assert res == ab
+        assert offset == 5
+        assert err is None
