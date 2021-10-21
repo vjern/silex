@@ -273,6 +273,8 @@ class ASynt(Synt):
         ends = []
         for pat in cls.patterns():
             if not pat:
+                start.goal = cls
+                ends.append(start)
                 continue
             ends.append(start >> pat >> Node(goal=cls))
         return start, ends
@@ -684,7 +686,7 @@ class TestASynt:
         def test_tree(self):
 
             a, b, c, d = Node.make(4)
-            b.goal = c.goal = d.goal = self.Arg
+            a.goal = b.goal = c.goal = d.goal = self.Arg
 
             a.children = {
                 Symbols.Ident: b,
@@ -759,6 +761,59 @@ class TestASynt:
                 [Symbols.Ident, Symbols.LeftPar],
             ]
 
+        def test_xtree(self):
+
+            a, b, c, d = Node.make(4)
+            a.goal = b.goal = c.goal = d.goal = self.Arg
+
+            a.children = {
+                Symbols.Ident: b,
+                Symbols.NumberLiteral: d
+            }
+            b.children = { Symbols.NumberLiteral: c }
+
+            t, ends = self.Arg.xtree()
+            a.print()
+            t.print()
+            assert a.assert_equals(t)
+            assert all(b.print() or a.assert_equals(b) for a, b in zip(ends, [b, c, d][::-1]))
+
+            assert t.last([]) == (False, 0)  # you can't have empty patterns anyway
+            assert t.last([Symbols.Ident]) == (self.Arg, 1)
+            assert t.last([Symbols.NumberLiteral]) == (self.Arg, 1)
+            assert t.last([Symbols.Ident, Symbols.NumberLiteral]) == (self.Arg, 2)
+            assert t.last([Symbols.NumberLiteral, Symbols.Ident]) == (self.Arg, 1)
+
+        def test_xtree_nested(self):
+            
+            class A(ASynt):
+                name: Symbols.Ident
+            
+            class B(ASynt):
+                _left: Symbols.LeftPar
+                a: Optional[A]
+                _right: Symbols.RightPar
+
+            a, b, c, d, e = Node.make(5)
+            d.goal = e.goal = B
+
+            a.children = { Symbols.LeftPar: b }
+            b.children = {
+                Symbols.Ident: c,
+                Symbols.RightPar: e
+            }
+            c.children = { Symbols.RightPar: d }
+
+            t, ends = B.xtree()
+            a.print()
+            t.print()
+            assert a.assert_equals(t)
+            assert all(a.assert_equals(b) for a, b in zip(ends, [d, e]))
+
+            assert t.last([Symbols.LeftPar, Symbols.RightPar]) == (B, 2)
+            assert t.last([Symbols.LeftPar, Symbols.Ident, Symbols.RightPar]) == (B, 3)
+            assert t.last([Symbols.LeftPar, Symbols.Ident, Symbols.NumberLiteral]) == (False, 3)
+            assert t.last([Symbols.LeftPar, Symbols.NumberLiteral, Symbols.RightPar]) == (False, 2)
 
 class TestItemList:
 
