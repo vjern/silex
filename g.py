@@ -218,7 +218,6 @@ class ASynt(Synt, ForwardRefResolver):
             if key.startswith('_'):
                 continue
             if getattr(obj, key) != getattr(self, key):
-                breakpoint()
                 return False
         return True
     
@@ -275,7 +274,6 @@ class ASynt(Synt, ForwardRefResolver):
                 print('our warriors have returned!', obj, tskip, err, value)
 
             if required and (obj is None or err):
-                # breakpoint()
                 return obj, tskip, err or Exception('%s:%s:Expected %s, found %s' % (cls.__name__, key, value, obj))
 
             if not key.startswith('_'):
@@ -1377,6 +1375,8 @@ class TestHard:
 
     def test_advanced(self):
 
+        SyntGeneric._templated = {}
+
         class Assignment(ASynt):
             name: Symbols.Ident
             _eq: Symbols.Equals
@@ -1466,7 +1466,6 @@ class TestHard:
                 instructions=[Instruction(value=lex.Unit('c', Symbols.Ident))]
             )
         )
-        breakpoint()
         assert res == ab
         assert offset == 5
         assert err is None
