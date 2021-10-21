@@ -148,7 +148,7 @@ class Node:
         n.goal = self.goal or node.goal
         n.children = {**self.children, **node.children}
         for common in self.children.keys() & node.children.keys():
-            n.children[common] = self.children[common].merge(node.children[common])
+            n.children[common] = self.children[common].merge(node.children[common], inplace=inplace)
         return n
 
 

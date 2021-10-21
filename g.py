@@ -5,7 +5,7 @@ from typing import Dict, ForwardRef, Generic, List, Literal, Optional, Tuple, An
 import typing
 
 import lex
-import tree
+from tree import Node, Specials
 
 
 T = TypeVar('T')
@@ -72,13 +72,17 @@ class Synt(SyntGeneric):
 
     @classmethod
     def patterns(cls) -> List[List[Enum]]:
-        return [[cls.T or tree.Specials.Any]]
+        return [[cls.T or Specials.Any]]
     
     @classmethod
-    def tree(cls) -> tree.Node:
-        start, end = tree.Node(), tree.Node(goal=cls)
-        start >> (cls.T or tree.Specials.Any) >> end
+    def tree(cls) -> Tuple[Node, List[Node]]:
+        start, end = Node(), Node(goal=cls)
+        start >> (cls.T or Specials.Any) >> end
         return start, [end]
+    
+    @classmethod
+    def xtree(cls) -> Tuple[Node, List[Node]]:
+        return cls.tree()
 
 
 class Symbols(Enum):
@@ -157,7 +161,7 @@ class Chain(Synt, SyntGeneric):
         t, ends = cls.T.tree()
         for e in ends:
             e.goal = cls
-            e.children[tree.Specials.Empty] = t
+            e.children[Specials.Empty] = t
         return t, ends
 
 
@@ -265,13 +269,49 @@ class ASynt(Synt):
 
     @classmethod
     def tree(cls):
-        start = tree.Node()
+        start = Node()
         ends = []
         for pat in cls.patterns():
             if not pat:
                 continue
-            ends.append(start >> pat >> tree.Node(goal=cls))
+            ends.append(start >> pat >> Node(goal=cls))
         return start, ends
+
+    @classmethod
+    def xtree(cls):
+        
+        start = Node(name='start')
+        nodes = [start]
+        
+        for _, value in cls.__annotations__.items():
+
+            required = True
+            while isinstance(value, typing._GenericAlias):
+                required = False
+                value, *_ = value.__args__
+            
+            if isinstance(value, str):
+                value = resolve_raw_forward_ref(value, cls.__module__)
+
+            if isinstance(value, Symbols):
+                for i, node in enumerate(list(nodes)):
+                    if not required:
+                        nodes.append(node)
+                    nodes[i] = node >> value >> Node()
+            else:
+                t, ends = value.xtree()
+                for e in ends:
+                    e.goal = None
+                for i, node in enumerate(list(nodes)):
+                    node.merge(t, inplace=True)
+                    if not required:
+                        ends.append(node)
+                nodes = ends
+
+        for n in nodes:
+            n.goal = cls
+
+        return start, nodes
 
 
 class TestASynt:
@@ -447,25 +487,74 @@ class TestASynt:
 
         units = [Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident]
 
-        root = tree.Node()
-        leaf = tree.Node(goal=TypeExpr)
+        root = Node()
+        leaf = Node(goal=TypeExpr)
         root >> Symbols.Ident >> leaf
         t, ends = TypeExpr.tree()
-        assert root == t
+        assert root.assert_equals(t)
+        assert len(ends) == 1 and all(a.assert_equals(b) for a, b in zip(ends, [leaf]))
         assert t.last(units) == (TypeExpr, 1)
 
-        root = tree.Node()
-        leaf = tree.Node(goal=Param)
+        root = Node()
+        leaf = Node(goal=Param)
         root >> (Symbols.Ident, Symbols.Ident) >> leaf
         t, ends = Param.tree()
-        assert root == t
+        assert root.assert_equals(t)
+        assert len(ends) == 1 and all(a.assert_equals(b) for a, b in zip(ends, [leaf]))
         assert t.last(units) == (Param, 2)
 
-        root = tree.Node()
-        leaf = tree.Node(goal=Func)
+        root = Node()
+        leaf = Node(goal=Func)
         root >> (Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident) >> leaf
         t, ends = Func.tree()
-        assert root == t
+        assert root.assert_equals(t)
+        assert len(ends) == 1 and all(a.assert_equals(b) for a, b in zip(ends, [leaf]))
+        assert t.last(units) == (Func, 4)
+
+    def test_xtree(self):
+
+        class TypeExpr(ASynt):
+            name: Symbols.Ident
+
+        class Param(ASynt):
+            name: Symbols.Ident
+            type: TypeExpr
+
+        class Func(ASynt):
+            name: Symbols.Ident
+            param: Param
+            returnType: TypeExpr
+
+        units = [Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident]
+
+        root = Node()
+        leaf = Node(goal=TypeExpr)
+        root >> Symbols.Ident >> leaf
+        t, ends = TypeExpr.xtree()
+        print('t =')
+        t.print()
+        assert root.assert_equals(t)
+        assert leaf.assert_equals(ends[0])
+        assert t.last(units) == (TypeExpr, 1)
+
+        root = Node()
+        leaf = Node(goal=Param)
+        root >> (Symbols.Ident, Symbols.Ident) >> leaf
+        t, ends = Param.xtree()
+        print('t =')
+        t.print()
+        assert root.assert_equals(t)
+        assert leaf.assert_equals(ends[0])
+        assert t.last(units) == (Param, 2)
+
+        root = Node()
+        leaf = Node(goal=Func)
+        root >> (Symbols.Ident, Symbols.Ident, Symbols.Ident, Symbols.Ident) >> leaf
+        t, ends = Func.xtree()
+        print('t =')
+        t.print()
+        assert root.assert_equals(t)
+        assert leaf.assert_equals(ends[0])
         assert t.last(units) == (Func, 4)
 
     class TestOptional:
@@ -593,22 +682,22 @@ class TestASynt:
             ]
         
         def test_tree(self):
-            a, b, c, d = tree.Node.make(4)
+
+            a, b, c, d = Node.make(4)
             b.goal = c.goal = d.goal = self.Arg
 
             a.children = {
                 Symbols.Ident: b,
                 Symbols.NumberLiteral: d
             }
-
-            b.children = {
-                Symbols.NumberLiteral: c
-            }
+            b.children = { Symbols.NumberLiteral: c }
 
             t, ends = self.Arg.tree()
             a.print()
             t.print()
-            assert a.assert_equals(t)
+            assert a.assert_equals(t)  # FIXME always have expected node on the same side of assert_equals for consistency's sake
+            assert all(b.print() or a.assert_equals(b) for a, b in zip(ends, [b, c, d][::-1]))
+
             assert t.last([]) == (False, 0)  # you can't have empty patterns anyway
             assert t.last([Symbols.Ident]) == (self.Arg, 1)
             assert t.last([Symbols.NumberLiteral]) == (self.Arg, 1)
@@ -625,7 +714,7 @@ class TestASynt:
                 a: Optional[A]
                 _right: Symbols.RightPar
 
-            a, b, c, d, e = tree.Node.make(5)
+            a, b, c, d, e = Node.make(5)
             d.goal = e.goal = B
 
             a.children = { Symbols.LeftPar: b }
@@ -639,6 +728,8 @@ class TestASynt:
             a.print()
             t.print()
             assert a.assert_equals(t)
+            assert all(a.assert_equals(b) for a, b in zip(ends, [d, e]))
+
             assert t.last([Symbols.LeftPar, Symbols.RightPar]) == (B, 2)
             assert t.last([Symbols.LeftPar, Symbols.Ident, Symbols.RightPar]) == (B, 3)
             assert t.last([Symbols.LeftPar, Symbols.Ident, Symbols.NumberLiteral]) == (False, 3)
@@ -799,7 +890,7 @@ class TestChain:
         c = Chain[TypeExpr]
         t, ends = c.tree()
 
-        a, b = tree.Node(),tree.Node(goal=TypeExpr)
+        a, b = Node(),Node(goal=TypeExpr)
         a.children = {
             Symbols.Ident: b
         }
@@ -807,7 +898,7 @@ class TestChain:
         tet, _ = TypeExpr.tree()
         assert tet.assert_equals(a)
 
-        a.children[Symbols.Ident].children = { tree.Specials.Empty: a }
+        a.children[Symbols.Ident].children = { Specials.Empty: a }
         a.children[Symbols.Ident].goal = c
         # assert t.assert_equals(a)  # FIXME recursive error
 
@@ -829,7 +920,7 @@ class TestChain:
         
         t, ends = Note.tree()
 
-        a, b, c, d, e, f, g, h, i, j, k, l, m = tree.Node.make(13)
+        a, b, c, d, e, f, g, h, i, j, k, l, m = Node.make(13)
         for n in (b,c, d, f, h, i, k, m):
             n.goal = Note
 
@@ -906,7 +997,7 @@ class SyntUnion(Synt):
 
     @classmethod
     def tree(cls):
-        start = tree.Node()
+        start = Node()
         ends = []
         cls.build()
         for c in cls.candidates:
@@ -1020,7 +1111,7 @@ class TestUnion:
         U = SyntUnion[Symbols.Ident, Symbols.NumberLiteral]
         t, ends = U.tree()
 
-        a, b, c = tree.Node.make(3)
+        a, b, c = Node.make(3)
         b.goal = Synt[Symbols.Ident]
         c.goal = Synt[Symbols.NumberLiteral]
         a.children = { Symbols.Ident: b, Symbols.NumberLiteral: c }
@@ -1050,7 +1141,7 @@ class TestUnion:
         
         t, ends = X.tree()
 
-        a, b, c, d, e, f = tree.Node.make(6)
+        a, b, c, d, e, f = Node.make(6)
         e.goal = f.goal = X
 
         a.children = { Symbols.Ident: b, Symbols.NumberLiteral: c }
@@ -1096,12 +1187,13 @@ class TestUnion:
         # first, tree
         t, ends = Block.tree()
 
-        a, b, c = tree.Node.make(3)
+        a, b, c = Node.make(3)
         b.goal = c.goal = Block
         a.children = { Symbols.Ident: b, Symbols.NumberLiteral: c }
-        b.children = c.children = { tree.Specials.Empty: a }
+        b.children = c.children = { Specials.Empty: a }
 
         assert a.assert_equals(t)
+        assert all(a.assert_equals(b) for a, b in zip(ends, [b, c]))
 
         units = [lex.Unit('a', Symbols.Ident), lex.Unit('b', Symbols.Ident), lex.Unit('11', Symbols.NumberLiteral)]
         assert t.last([u.type for u in units]) == (Block, 3)
@@ -1112,16 +1204,23 @@ class TestUnion:
         assert r == units   
 
 
-class TestHard:
+# class TestHard:
 
-    def test_basic(self):
+#     def test_basic(self):
 
-        class Block(ASynt):
-            _left: Symbols.LeftBracket
-            instructions: Chain['Instruction']
-            _right: Symbols.RightBracket
+#         class Block(ASynt):
+#             _left: Symbols.LeftBracket
+#             instructions: Chain['Instruction']
+#             _right: Symbols.RightBracket
         
-        class Instruction(ASynt):
-            value: Symbols.Ident
+#         class Instruction(ASynt):
+#             value: SyntUnion[Block, Symbols.Ident]
+
+#         t, ends = Block.tree()
         
-        Block.resolve_forward_refs(locals())
+#         units = [
+#             lex.Unit('{', Symbols.LeftBracket),
+#             lex.Unit('}', Symbols.RightBracket)
+#         ]
+
+#         assert t.last([u.type for u in units]) == Block
