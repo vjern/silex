@@ -22,7 +22,13 @@ def resolve_raw_forward_ref(name: str, modulename: str, ctx: dict = None) -> typ
     return result or getattr(module, name, None)
 
 
-class SyntGeneric(Generic[T]):
+class ForwardRefResolver:
+    @classmethod
+    def resolve_forward_refs(cls, ctx=None):
+        raise NotImplementedError
+
+
+class SyntGeneric(ForwardRefResolver, Generic[T]):
 
     _templated = {}
     
@@ -37,6 +43,24 @@ class SyntGeneric(Generic[T]):
             return n
         n = cls._templated[cls, t] = type(*cls.__class_template__(t))
         return n
+    
+    @classmethod
+    def resolve_forward_refs(cls, ctx=None):
+        value = cls.T
+        optional = False
+        while isinstance(value, typing._GenericAlias):
+            if value.__origin__ is Union:
+                optional = True
+            value, *_ = value.__args__
+        if isinstance(value, str):
+            value = resolve_raw_forward_ref(value, cls.__module__, ctx)
+        elif isinstance(value, ForwardRef):
+            value = value._evaluate(globals(), ctx)
+        elif isinstance(value, type) and issubclass(value, ForwardRefResolver):
+            value.resolve_forward_refs(ctx)
+        if optional:
+            value = Optional[value]
+        cls.T = value
 
 
 class TestSyntGeneric:
@@ -158,14 +182,19 @@ class Chain(Synt, SyntGeneric):
     
     @classmethod
     def tree(cls):
-        t, ends = cls.T.tree()
+        t, ends = cls.T.xtree()
         for e in ends:
             e.goal = cls
             e.children[Specials.Empty] = t
         return t, ends
+        for e in ends:
+            t = t.merge(e, inplace=True)
+            # FIXME this cuts the relationship between e and its parent which we want to keep
+        t.goal = cls
+        return t, [t]
 
 
-class ASynt(Synt):
+class ASynt(Synt, ForwardRefResolver):
 
     def __repr__(self):
         astr = ', '.join('%s=%s' % (key, getattr(self, key)) for key in self.__annotations__ if not key.startswith('_'))
@@ -194,6 +223,8 @@ class ASynt(Synt):
                 value = resolve_raw_forward_ref(value, cls.__module__, ctx)
             elif isinstance(value, ForwardRef):
                 value = value._evaluate(globals(), ctx)
+            elif isinstance(value, type) and issubclass(value, ForwardRefResolver):
+                value.resolve_forward_refs(ctx)
             if optional:
                 value = Optional[value]
             ants[key] = value
@@ -1066,7 +1097,7 @@ class SyntUnion(Synt):
         if hasattr(cls, 'tries'):
             return
         cls.tries = {
-            c: c.tree()[0]
+            c: c.xtree()[0]
             for c in cls.candidates
         }
 
@@ -1271,11 +1302,16 @@ class TestUnion:
 #         class Instruction(ASynt):
 #             value: SyntUnion[Block, Symbols.Ident]
 
-#         t, ends = Block.tree()
+#         Block.resolve_forward_refs(locals())
+#         assert Block.__annotations__['instructions'].T is Instruction
+
+#         # t, ends = Block.xtree()
         
 #         units = [
 #             lex.Unit('{', Symbols.LeftBracket),
 #             lex.Unit('}', Symbols.RightBracket)
 #         ]
 
-#         assert t.last([u.type for u in units]) == Block
+#         Block.parse(units)
+
+#         # assert t.last([u.type for u in units]) == Block

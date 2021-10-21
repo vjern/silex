@@ -131,8 +131,8 @@ class Node:
 
     def print(self, depth: int = 0, indent: int = 2, key: str = None, history: set = set()):
         if self in history:
-            return print(' ' * depth * indent + (f'$ \033[96m{self.name}\033[m' if self.name else '...'))
-        tstr = f'{key}: ' * bool(key) + (f'\033[1;92m{self.name or self.goal}\033[m' * bool(self.goal) or f'\033[93m{self.name}\033[m' * bool(self.name) or '$')
+            return print(' ' * depth * indent + (f'{key}: \033[96m{self.name}\033[m' if self.name else '...'))
+        tstr = f'{key}: ' * bool(key) + (f'\033[1;92m{self.name} = {self.goal}\033[m' * bool(self.goal) or f'\033[93m{self.name}\033[m' * bool(self.name) or '$')
         print(' ' * depth * indent + tstr, '{' + '}' * (not len(self.children)))
         for key, value in self.children.items():
             value.print(depth + 1, key=key, history={*history, self})
@@ -144,7 +144,7 @@ class Node:
         if inplace:
             n = self
         if self.goal and node.goal and self.goal != node.goal:
-            raise Exception('Conflicting goals')
+            raise Exception('Conflicting goals %s %s' % (self.goal, node.goal))
         n.goal = self.goal or node.goal
         n.children = {**self.children, **node.children}
         for common in self.children.keys() & node.children.keys():
