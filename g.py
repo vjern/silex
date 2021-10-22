@@ -672,7 +672,7 @@ class TestASynt:
             assert result is None
             assert offset == 0
             assert err is not None
-            assert str(err) == 'Expected %s' % Symbols.Ident
+            assert str(err) == '%s:%s:Expected %s, found None' % (Arg.__name__, 'b', Symbols.Ident)
 
         def test_nested(self):
             
