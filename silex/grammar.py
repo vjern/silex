@@ -1,12 +1,10 @@
 from dataclasses import dataclass
 from enum import Enum
-import traceback
-from sys import meta_path
-from typing import Dict, ForwardRef, Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, Union
+from typing import ForwardRef, Generic, List, Literal, Optional, Tuple, Any, Type, TypeVar, Union
 import typing
 
-import lex
-from tree import Node, Specials
+from . import lex
+from .tree import Node, Specials
 
 
 T = TypeVar('T')

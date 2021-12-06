@@ -1,7 +1,7 @@
 .ONESHELL:
 
 testx:
-	python -m pytest g.py -vv
+	python -m pytest tests -vv
 
 test:
 	python -m pytest --cov=g.py --cov-report term-missing g.py -vvv
