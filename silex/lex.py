@@ -9,7 +9,7 @@ class Unit:
     text: str
     type: t.Optional[Enum] = None
     def __repr__(self):
-        return f'{self.type.name}({self.text!r})'
+        return f'{self.type and self.type.name or self.type}({self.text!r})'
 
 
 @dataclass
